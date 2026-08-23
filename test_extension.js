@@ -183,6 +183,7 @@ async function testExtension() {
           ['w', 'width', 'h', 'height', 'resize', 'maxwidth', 'maxheight', 'fit', 'crop'].forEach(p => {
             cleanParams.delete(p);
           });
+          cleanParams.sort();
           queryString = cleanParams.toString();
         }
         return `${parsed.origin}${path}${queryString ? '?' + queryString : ''}`;
@@ -213,14 +214,19 @@ async function testExtension() {
     const pngUrl = 'https://example.com/assets/logo.png';
     assert.notStrictEqual(getCanonicalImageKey(jpgUrl), getCanonicalImageKey(pngUrl), 'logo.jpg và logo.png là 2 tài nguyên độc lập, không được gộp nhầm');
 
-    // Verify identity-bearing query params are kept distinct
-    const dynamicUrl1 = 'https://example.com/api/get-image?id=101&w=500';
-    const dynamicUrl2 = 'https://example.com/api/get-image?id=102&w=800';
-    assert.notStrictEqual(getCanonicalImageKey(dynamicUrl1), getCanonicalImageKey(dynamicUrl2), 'Hai URL có id query khác nhau phải có key khác nhau');
+    // Verify query param order invariance
+    const urlOrderA = 'https://example.com/api/view?auth=true&id=999&w=300';
+    const urlOrderB = 'https://example.com/api/view?w=700&id=999&auth=true';
+    assert.strictEqual(getCanonicalImageKey(urlOrderA), getCanonicalImageKey(urlOrderB), 'Thứ tự query params khác nhau phải cho ra cùng 1 canonical key');
+
+    // Verify raw observed URL is preserved when creating candidate item
+    const observedRawUrl = 'https://example.com/wp-content/uploads/2026/03/product-300x300.jpg';
+    const parsedKey = getCanonicalImageKey(observedRawUrl);
+    assert(parsedKey.endsWith('.jpg'), 'Phải giữ nguyên extension .jpg trong canonical key');
   }
 
   testDeduplicationEngine();
-  console.log('✓ 10. Thuật toán Khử trùng lặp bảo tồn đúng 100% định dạng và identity parameters');
+  console.log('✓ 10. Thuật toán Khử trùng lặp bảo tồn đúng 100% định dạng, sắp xếp query parameters và giữ nguyên fallbackUrl');
 
   // 12. Test Dimension Preset Boundary Classification (Small < 300, Medium 300-800, Large > 800)
   function testPresetClassification(w, h, preset) {

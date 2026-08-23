@@ -155,13 +155,14 @@ document.addEventListener('DOMContentLoaded', () => {
       // Bỏ đuôi kích thước responsive: -1024x768 hoặc -scaled (giữ nguyên phần mở rộng .jpg/.png)
       path = path.replace(/(?:-\d{2,4}x\d{2,4}|-scaled)(?=\.[a-z0-9]+$)/i, '');
       
-      // Chỉ loại bỏ các query param thuần kích thước/resize, giữ nguyên identity params
+      // Chỉ loại bỏ các query param thuần kích thước/resize, sắp xếp các params còn lại theo thứ tự alphabet
       let queryString = '';
       if (parsed.search) {
         const cleanParams = new URLSearchParams(parsed.search);
         ['w', 'width', 'h', 'height', 'resize', 'maxwidth', 'maxheight', 'fit', 'crop'].forEach(p => {
           cleanParams.delete(p);
         });
+        cleanParams.sort();
         queryString = cleanParams.toString();
       }
       return `${parsed.origin}${path}${queryString ? '?' + queryString : ''}`;
@@ -635,8 +636,8 @@ document.addEventListener('DOMContentLoaded', () => {
     return false;
   }
 
-  async function convertImageToBlob(url, targetMimeType = 'image/jpeg', quality = 0.92) {
-    const sourceBlob = await fetchImageAsBlob(url);
+  async function convertImageToBlob(url, targetMimeType = 'image/jpeg', quality = 0.92, fallbackUrl = null) {
+    const sourceBlob = await fetchImageAsBlob(url, fallbackUrl);
     const objectUrl = URL.createObjectURL(sourceBlob);
     try {
       return await new Promise((resolve, reject) => {
@@ -671,7 +672,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  async function fetchImageAsBlob(url) {
+  async function fetchImageAsBlob(url, fallbackUrl = null) {
     if (url.startsWith('data:image/svg+xml;charset=utf-8,')) {
       const svgContent = decodeURIComponent(url.replace('data:image/svg+xml;charset=utf-8,', ''));
       return new Blob([svgContent], { type: 'image/svg+xml' });
@@ -680,9 +681,19 @@ document.addEventListener('DOMContentLoaded', () => {
       const res = await fetch(url);
       return await res.blob();
     }
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`HTTP error ${response.status}`);
-    return await response.blob();
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP error ${response.status}`);
+      return await response.blob();
+    } catch (err) {
+      if (fallbackUrl && fallbackUrl !== url) {
+        try {
+          const fallbackResp = await fetch(fallbackUrl);
+          if (fallbackResp.ok) return await fallbackResp.blob();
+        } catch { }
+      }
+      throw err;
+    }
   }
 
   async function prepareImagePayload(item, index = 1, convertMode = 'original') {
@@ -695,14 +706,14 @@ document.addEventListener('DOMContentLoaded', () => {
       filename = `${nameWithoutExt}${targetExt}`;
 
       try {
-        const convertedBlob = await convertImageToBlob(item.url, targetMime, 0.92);
+        const convertedBlob = await convertImageToBlob(item.url, targetMime, 0.92, item.fallbackUrl);
         return { blob: convertedBlob, filename, isConverted: true };
       } catch (e) {
         console.warn('Chuyển đổi ảnh thất bại, dùng file gốc:', item.url, e);
       }
     }
 
-    const blob = await fetchImageAsBlob(item.url);
+    const blob = await fetchImageAsBlob(item.url, item.fallbackUrl);
     return { blob, filename, isConverted: false };
   }
 
@@ -959,7 +970,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return raw.replace(/[/\\?%*:|"<>]/g, '_').trim();
   }
 
-  function executeDownload(url, filename) {
+  function executeDownload(url, filename, fallbackUrl = null) {
     return new Promise((resolve, reject) => {
       // Check if it is a data URL SVG or large data URL
       if (url.startsWith('data:image/svg+xml;charset=utf-8,')) {
@@ -993,6 +1004,21 @@ document.addEventListener('DOMContentLoaded', () => {
         saveAs: false
       }, (downloadId) => {
         if (chrome.runtime.lastError || !downloadId) {
+          if (fallbackUrl && fallbackUrl !== url) {
+            chrome.downloads.download({
+              url: fallbackUrl,
+              filename: filename,
+              conflictAction: 'uniquify',
+              saveAs: false
+            }, (fallbackId) => {
+              if (chrome.runtime.lastError || !fallbackId) {
+                reject(chrome.runtime.lastError || new Error('Download failed'));
+              } else {
+                resolve(fallbackId);
+              }
+            });
+            return;
+          }
           reject(chrome.runtime.lastError || new Error('Download failed'));
         } else {
           resolve(downloadId);
@@ -1009,7 +1035,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     showToast(`Đang tải: ${filename}`);
     try {
-      await executeDownload(item.url, filename);
+      await executeDownload(item.url, filename, item.fallbackUrl);
       showToast(`Đã tải xong: ${filename}`);
     } catch (err) {
       showToast('Lỗi khi tải ảnh: ' + (err.message || 'Thất bại'));

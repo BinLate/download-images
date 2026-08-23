@@ -149,13 +149,14 @@
       // Bỏ đuôi kích thước responsive: -1024x768 hoặc -scaled (giữ nguyên phần mở rộng .jpg/.png)
       path = path.replace(/(?:-\d{2,4}x\d{2,4}|-scaled)(?=\.[a-z0-9]+$)/i, '');
       
-      // Chỉ loại bỏ các query param thuần kích thước/resize, giữ nguyên identity params
+      // Chỉ loại bỏ các query param thuần kích thước/resize, sắp xếp các params còn lại theo thứ tự alphabet
       let queryString = '';
       if (parsed.search) {
         const cleanParams = new URLSearchParams(parsed.search);
         ['w', 'width', 'h', 'height', 'resize', 'maxwidth', 'maxheight', 'fit', 'crop'].forEach(p => {
           cleanParams.delete(p);
         });
+        cleanParams.sort();
         queryString = cleanParams.toString();
       }
       return `${parsed.origin}${path}${queryString ? '?' + queryString : ''}`;
@@ -184,12 +185,15 @@
       const alt = item.alt ? item.alt.trim().slice(0, 150) : '';
       const format = detectFormat(cleanUrl);
       const source = item.source || 'img';
+      const unscaledCandidate = getOriginalUnscaledUrl(cleanUrl);
+      const bestTargetUrl = (unscaledCandidate && unscaledCandidate !== cleanUrl) ? unscaledCandidate : cleanUrl;
+      const fallbackUrl = cleanUrl; // Luôn bảo tồn URL thực tế quan sát được
 
       const existing = rawImagesMap.get(canonicalKey);
       if (!existing) {
         rawImagesMap.set(canonicalKey, {
-          url: cleanUrl,
-          fallbackUrl: cleanUrl,
+          url: bestTargetUrl,
+          fallbackUrl: fallbackUrl,
           canonicalKey: canonicalKey,
           width: width,
           height: height,
@@ -204,8 +208,8 @@
         const isBetterPriority = (item.priority || 1) > (existing.priority || 1);
         
         if (isHigherRes || isBetterPriority) {
-          existing.url = cleanUrl;
-          existing.fallbackUrl = cleanUrl;
+          existing.url = bestTargetUrl;
+          existing.fallbackUrl = fallbackUrl;
           if (width > 0) existing.width = width;
           if (height > 0) existing.height = height;
           if (!existing.alt && alt) existing.alt = alt;
@@ -310,7 +314,7 @@
 
         if (bestUrl) {
           addCandidateImage({
-            url: getOriginalUnscaledUrl(bestUrl),
+            url: bestUrl,
             width: naturalW || maxWidth,
             height: naturalH,
             alt: alt,
@@ -383,7 +387,7 @@
           candidateUrls.sort((a, b) => (b.priority - a.priority) || (b.width - a.width));
           const best = candidateUrls[0];
           addCandidateImage({
-            url: getOriginalUnscaledUrl(best.url),
+            url: best.url,
             width: naturalWidth || best.width,
             height: naturalHeight,
             alt: alt,
@@ -404,7 +408,7 @@
         const bgImage = style ? style.backgroundImage : null;
         if (bgImage && bgImage !== 'none') {
           const urls = extractUrlsFromBgStyle(bgImage);
-          urls.forEach(u => addCandidateImage({ url: getOriginalUnscaledUrl(u), width: w, height: h, alt: '', source: 'background', priority: 1 }));
+          urls.forEach(u => addCandidateImage({ url: u, width: w, height: h, alt: '', source: 'background', priority: 1 }));
         }
 
         // ::before pseudo-element
@@ -412,7 +416,7 @@
         const beforeBg = beforeStyle ? beforeStyle.backgroundImage : null;
         if (beforeBg && beforeBg !== 'none') {
           const urls = extractUrlsFromBgStyle(beforeBg);
-          urls.forEach(u => addCandidateImage({ url: getOriginalUnscaledUrl(u), width: w, height: h, alt: '', source: 'bg-before', priority: 1 }));
+          urls.forEach(u => addCandidateImage({ url: u, width: w, height: h, alt: '', source: 'bg-before', priority: 1 }));
         }
 
         // ::after pseudo-element
@@ -420,7 +424,7 @@
         const afterBg = afterStyle ? afterStyle.backgroundImage : null;
         if (afterBg && afterBg !== 'none') {
           const urls = extractUrlsFromBgStyle(afterBg);
-          urls.forEach(u => addCandidateImage({ url: getOriginalUnscaledUrl(u), width: w, height: h, alt: '', source: 'bg-after', priority: 1 }));
+          urls.forEach(u => addCandidateImage({ url: u, width: w, height: h, alt: '', source: 'bg-after', priority: 1 }));
         }
       } catch {
         // Skip un-computable elements
