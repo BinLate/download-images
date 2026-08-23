@@ -1,5 +1,12 @@
-.ai/chrome-reviewer-profile/
-.ai/*.log
-.ai/*.jsonl
+# Skills & AI Orchestration infrastructure
+.agents/
+.ai/
+gemini-and-chatgpt/
+
+# Python & Caches
 __pycache__/
 *.pyc
+*.pma
+*.dat
+*.log
+*.jsonl
