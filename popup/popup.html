@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Image Collector & Downloader Pro</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>
+            <circle cx="9" cy="9" r="2"/>
+            <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1>Image Downloader</h1>
+          <span class="badge badge-primary" id="total-count-badge">0 ảnh</span>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <button id="btn-refresh" class="btn-icon" title="Quét lại trang hiện tại">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+            <path d="M21 3v5h-5"/>
+            <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+            <path d="M8 16H3v5"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Filter Section -->
+    <section class="filter-section">
+      <!-- Search & Quick Presets -->
+      <div class="filter-row search-row">
+        <div class="search-input-wrap">
+          <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/>
+            <path d="m21 21-4.3-4.3"/>
+          </svg>
+          <input type="text" id="search-input" placeholder="Tìm theo tên file, định dạng, URL..." autocomplete="off">
+          <button id="btn-clear-search" class="btn-clear hidden" title="Xóa tìm kiếm">&times;</button>
+        </div>
+
+        <div class="sort-select-wrap">
+          <select id="sort-select" title="Sắp xếp danh sách">
+            <option value="default">Sắp xếp: Mặc định</option>
+            <option value="size-desc">Diện tích (Lớn → Nhỏ)</option>
+            <option value="size-asc">Diện tích (Nhỏ → Lớn)</option>
+            <option value="width-desc">Chiều rộng (Rộng nhất)</option>
+            <option value="height-desc">Chiều cao (Cao nhất)</option>
+            <option value="name-asc">Tên file (A → Z)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Quick Dimension Presets -->
+      <div class="preset-chips-wrap">
+        <span class="preset-label">Kích thước:</span>
+        <button class="chip active" data-preset="all">Tất cả</button>
+        <button class="chip" data-preset="small">Nhỏ (&lt; 200px)</button>
+        <button class="chip" data-preset="medium">Vừa (200 - 800px)</button>
+        <button class="chip" data-preset="large">Lớn (&gt; 800px)</button>
+        <button class="chip" data-preset="hd">HD (&gt; 1080px)</button>
+      </div>
+
+      <!-- Custom Dimension Filters -->
+      <div class="dimension-filters">
+        <div class="dim-group">
+          <label for="min-width">Chiều rộng (W):</label>
+          <div class="dim-inputs">
+            <input type="number" id="min-width" placeholder="Min" min="0" max="10000" step="10">
+            <span class="dim-separator">-</span>
+            <input type="number" id="max-width" placeholder="Max" min="0" max="10000" step="10">
+            <span class="dim-unit">px</span>
+          </div>
+        </div>
+
+        <div class="dim-group">
+          <label for="min-height">Chiều cao (H):</label>
+          <div class="dim-inputs">
+            <input type="number" id="min-height" placeholder="Min" min="0" max="10000" step="10">
+            <span class="dim-separator">-</span>
+            <input type="number" id="max-height" placeholder="Max" min="0" max="10000" step="10">
+            <span class="dim-unit">px</span>
+          </div>
+        </div>
+
+        <button id="btn-reset-filters" class="btn-text" title="Đặt lại bộ lọc">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+            <path d="M3 3v5h5"/>
+          </svg>
+          Reset
+        </button>
+      </div>
+
+      <!-- Format Filter Tabs -->
+      <div class="format-chips-wrap">
+        <span class="preset-label">Định dạng:</span>
+        <button class="format-chip active" data-format="ALL">ALL</button>
+        <button class="format-chip" data-format="JPG">JPG</button>
+        <button class="format-chip" data-format="PNG">PNG</button>
+        <button class="format-chip" data-format="WEBP">WEBP</button>
+        <button class="format-chip" data-format="SVG">SVG</button>
+        <button class="format-chip" data-format="GIF">GIF</button>
+        <button class="format-chip" data-format="OTHER">KHÁC</button>
+      </div>
+    </section>
+
+    <!-- Selection Bar -->
+    <div class="selection-bar">
+      <div class="selection-left">
+        <label class="custom-checkbox select-all-label">
+          <input type="checkbox" id="checkbox-select-all">
+          <span class="checkmark"></span>
+          <span class="select-text">Chọn tất cả</span>
+        </label>
+        <button id="btn-invert-selection" class="btn-link">Đảo chọn</button>
+      </div>
+
+      <div class="selection-right">
+        <span id="selection-counter" class="selection-counter">Đã chọn: <strong>0</strong> / <span id="filtered-count">0</span></span>
+      </div>
+    </div>
+
+    <!-- Main Content: Image Grid / Loading / Empty -->
+    <main class="content-area">
+      <!-- Loading State -->
+      <div id="loading-state" class="state-container hidden">
+        <div class="spinner"></div>
+        <p class="state-title">Đang quét hình ảnh trên trang...</p>
+        <p class="state-desc">Vui lòng chờ trong giây lát</p>
+      </div>
+
+      <!-- Empty State -->
+      <div id="empty-state" class="state-container hidden">
+        <div class="state-icon">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>
+            <circle cx="9" cy="9" r="2"/>
+            <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>
+          </svg>
+        </div>
+        <p class="state-title">Không tìm thấy hình ảnh phù hợp</p>
+        <p class="state-desc">Thử điều chỉnh lại bộ lọc kích thước hoặc định dạng</p>
+        <button id="btn-empty-reset" class="btn-secondary">Xóa bộ lọc</button>
+      </div>
+
+      <!-- Image Grid -->
+      <div id="image-grid" class="image-grid">
+        <!-- Rendered dynamically by popup.js -->
+      </div>
+    </main>
+
+    <!-- Sticky Bottom Action & Progress Bar -->
+    <footer class="app-footer">
+      <!-- Download Progress Area (Hidden by default) -->
+      <div id="progress-container" class="progress-container hidden">
+        <div class="progress-info">
+          <span id="progress-status-text">Đang tải xuống...</span>
+          <span id="progress-percentage">0%</span>
+        </div>
+        <div class="progress-bar-track">
+          <div id="progress-bar-fill" class="progress-bar-fill" style="width: 0%"></div>
+        </div>
+      </div>
+
+      <!-- Action Controls -->
+      <div class="footer-actions">
+        <div class="delay-setting" title="Thời gian trễ giữa mỗi ảnh để tránh nghẽn trình duyệt">
+          <label for="download-delay">Độ trễ:</label>
+          <select id="download-delay">
+            <option value="150">150 ms</option>
+            <option value="300" selected>300 ms (Chuẩn)</option>
+            <option value="500">500 ms</option>
+            <option value="1000">1000 ms (An toàn)</option>
+          </select>
+        </div>
+
+        <div class="action-buttons">
+          <button id="btn-cancel-download" class="btn-danger hidden">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="15" y1="9" x2="9" y2="15"/>
+              <line x1="9" y1="9" x2="15" y2="15"/>
+            </svg>
+            Dừng tải
+          </button>
+
+          <button id="btn-download-selected" class="btn-primary" disabled>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            <span id="download-btn-text">Tải xuống (0 ảnh)</span>
+          </button>
+        </div>
+      </div>
+    </footer>
+
+    <!-- Fullscreen Image Preview Modal -->
+    <div id="preview-modal" class="modal-backdrop hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div class="modal-title-group">
+            <h3 id="modal-image-title">Chi tiết hình ảnh</h3>
+            <span id="modal-image-dimensions" class="badge badge-info">1920 × 1080</span>
+          </div>
+          <button id="btn-close-modal" class="btn-icon" title="Đóng">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="preview-img-wrap">
+            <img id="modal-preview-img" src="" alt="Xem trước">
+          </div>
+          <div class="modal-info-meta">
+            <div class="meta-item">
+              <span class="meta-label">Định dạng:</span>
+              <span id="modal-format" class="meta-value">JPG</span>
+            </div>
+            <div class="meta-item">
+              <span class="meta-label">Nguồn:</span>
+              <span id="modal-source" class="meta-value">img tag</span>
+            </div>
+            <div class="meta-item full-width">
+              <span class="meta-label">URL:</span>
+              <a id="modal-url" class="meta-value link-truncate" href="#" target="_blank">https://...</a>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button id="modal-btn-copy-url" class="btn-secondary">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/>
+              <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+            </svg>
+            Sao chép URL
+          </button>
+          <button id="modal-btn-download" class="btn-primary">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Tải ảnh này
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="toast hidden"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

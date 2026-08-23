@@ -1,0 +1,426 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemini-and-chatgpt.local/schemas/project-context.schema.json",
+  "title": "gemini-and-chatgpt v2.1 Project Context",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "project",
+    "stack",
+    "modules",
+    "architecture",
+    "conventions",
+    "commands",
+    "decisions",
+    "known_risks",
+    "environment",
+    "provenance",
+    "discovery",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "2.1.0"
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "root",
+        "repository"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "root": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repository": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[^/\\s]+/[^/\\s]+$"
+        }
+      }
+    },
+    "stack": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "languages",
+        "package_managers",
+        "frameworks"
+      ],
+      "properties": {
+        "languages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "file_count"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "file_count": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        },
+        "package_managers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "frameworks": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "modules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "source_file_count",
+          "language_hints"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_file_count": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "language_hints": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          }
+        }
+      }
+    },
+    "architecture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary",
+        "components",
+        "boundaries",
+        "constraints"
+      ],
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "components": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "boundaries": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "constraints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "conventions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "coding",
+        "testing",
+        "git"
+      ],
+      "properties": {
+        "coding": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "testing": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "git": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "commands": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "install",
+        "lint",
+        "typecheck",
+        "test",
+        "build"
+      ],
+      "properties": {
+        "install": {
+          "$ref": "#/$defs/commandList"
+        },
+        "lint": {
+          "$ref": "#/$defs/commandList"
+        },
+        "typecheck": {
+          "$ref": "#/$defs/commandList"
+        },
+        "test": {
+          "$ref": "#/$defs/commandList"
+        },
+        "build": {
+          "$ref": "#/$defs/commandList"
+        }
+      }
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "decision",
+          "reason",
+          "recorded_at"
+        ],
+        "properties": {
+          "decision": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string"
+          },
+          "recorded_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    },
+    "known_risks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_variable_names"
+      ],
+      "properties": {
+        "required_variable_names": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "commands",
+        "stack",
+        "modules",
+        "conventions",
+        "environment",
+        "redactions"
+      ],
+      "properties": {
+        "commands": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "install",
+            "lint",
+            "typecheck",
+            "test",
+            "build"
+          ],
+          "properties": {
+            "install": {
+              "$ref": "#/$defs/pathList"
+            },
+            "lint": {
+              "$ref": "#/$defs/pathList"
+            },
+            "typecheck": {
+              "$ref": "#/$defs/pathList"
+            },
+            "test": {
+              "$ref": "#/$defs/pathList"
+            },
+            "build": {
+              "$ref": "#/$defs/pathList"
+            }
+          }
+        },
+        "stack": {
+          "$ref": "#/$defs/pathList"
+        },
+        "modules": {
+          "$ref": "#/$defs/pathList"
+        },
+        "conventions": {
+          "$ref": "#/$defs/pathList"
+        },
+        "environment": {
+          "$ref": "#/$defs/pathList"
+        },
+        "redactions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "discovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "generated_at",
+        "fingerprint",
+        "inventory_fingerprint",
+        "source_file_count",
+        "sources",
+        "scan_limit",
+        "files_observed"
+      ],
+      "properties": {
+        "generated_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "scan_limit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "files_observed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "size",
+              "mtime_ns",
+              "sha256"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "mtime_ns": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          }
+        },
+        "inventory_fingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "source_file_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "$defs": {
+    "commandList": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "pathList": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    }
+  }
+}
