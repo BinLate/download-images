@@ -151,7 +151,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (url.startsWith('data:')) return url;
     try {
       const parsed = new URL(url);
-      let path = parsed.pathname.toLowerCase();
+      let path = parsed.pathname; // Giữ nguyên case của pathname
       // Bỏ đuôi kích thước responsive: -1024x768 hoặc -scaled (giữ nguyên phần mở rộng .jpg/.png)
       path = path.replace(/(?:-\d{2,4}x\d{2,4}|-scaled)(?=\.[a-z0-9]+$)/i, '');
       
@@ -159,15 +159,15 @@ document.addEventListener('DOMContentLoaded', () => {
       let queryString = '';
       if (parsed.search) {
         const cleanParams = new URLSearchParams(parsed.search);
-        ['w', 'width', 'h', 'height', 'resize', 'maxwidth', 'maxheight', 'fit', 'crop'].forEach(p => {
+        ['w', 'width', 'h', 'height', 'resize', 'maxwidth', 'maxheight'].forEach(p => {
           cleanParams.delete(p);
         });
         cleanParams.sort();
         queryString = cleanParams.toString();
       }
-      return `${parsed.origin}${path}${queryString ? '?' + queryString : ''}`;
+      return `${parsed.origin.toLowerCase()}${path}${queryString ? '?' + queryString : ''}`;
     } catch {
-      return url.toLowerCase();
+      return url;
     }
   }
 
@@ -187,6 +187,7 @@ document.addEventListener('DOMContentLoaded', () => {
                   const isNewHigherRes = ((img.width || 0) * (img.height || 0)) > ((curr.width || 0) * (curr.height || 0));
                   if (isNewHigherRes) {
                     curr.url = img.url;
+                    curr.fallbackUrl = img.fallbackUrl || img.url;
                     curr.width = img.width;
                     curr.height = img.height;
                     curr.format = img.format;

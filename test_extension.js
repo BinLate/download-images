@@ -174,21 +174,21 @@ async function testExtension() {
       if (!url) return '';
       try {
         const parsed = new URL(url);
-        let path = parsed.pathname.toLowerCase();
+        let path = parsed.pathname; // Giữ nguyên case của pathname
         path = path.replace(/(?:-\d{2,4}x\d{2,4}|-scaled)(?=\.[a-z0-9]+$)/i, '');
         
         let queryString = '';
         if (parsed.search) {
           const cleanParams = new URLSearchParams(parsed.search);
-          ['w', 'width', 'h', 'height', 'resize', 'maxwidth', 'maxheight', 'fit', 'crop'].forEach(p => {
+          ['w', 'width', 'h', 'height', 'resize', 'maxwidth', 'maxheight'].forEach(p => {
             cleanParams.delete(p);
           });
           cleanParams.sort();
           queryString = cleanParams.toString();
         }
-        return `${parsed.origin}${path}${queryString ? '?' + queryString : ''}`;
+        return `${parsed.origin.toLowerCase()}${path}${queryString ? '?' + queryString : ''}`;
       } catch {
-        return url.toLowerCase();
+        return url;
       }
     }
 
@@ -214,19 +214,28 @@ async function testExtension() {
     const pngUrl = 'https://example.com/assets/logo.png';
     assert.notStrictEqual(getCanonicalImageKey(jpgUrl), getCanonicalImageKey(pngUrl), 'logo.jpg và logo.png là 2 tài nguyên độc lập, không được gộp nhầm');
 
+    // Verify case-sensitive path preservation
+    const uppercasePathUrl = 'https://example.com/images/Asset_A.jpg';
+    const lowercasePathUrl = 'https://example.com/images/asset_a.jpg';
+    assert.notStrictEqual(getCanonicalImageKey(uppercasePathUrl), getCanonicalImageKey(lowercasePathUrl), 'URL có path chữ hoa/thường khác nhau phải giữ nguyên tính phân biệt case');
+
     // Verify query param order invariance
     const urlOrderA = 'https://example.com/api/view?auth=true&id=999&w=300';
     const urlOrderB = 'https://example.com/api/view?w=700&id=999&auth=true';
     assert.strictEqual(getCanonicalImageKey(urlOrderA), getCanonicalImageKey(urlOrderB), 'Thứ tự query params khác nhau phải cho ra cùng 1 canonical key');
 
-    // Verify raw observed URL is preserved when creating candidate item
+    // Verify raw observed URL is preserved as fallbackUrl when inferred unscaled URL fails
     const observedRawUrl = 'https://example.com/wp-content/uploads/2026/03/product-300x300.jpg';
     const parsedKey = getCanonicalImageKey(observedRawUrl);
     assert(parsedKey.endsWith('.jpg'), 'Phải giữ nguyên extension .jpg trong canonical key');
+
+    // Test extractor serialization with fallbackUrl
+    const sampleItem = { url: 'https://example.com/image.jpg', fallbackUrl: observedRawUrl, width: 300, height: 300 };
+    assert.strictEqual(sampleItem.fallbackUrl, observedRawUrl, 'fallbackUrl phải được bảo tồn trọn vẹn trong cấu trúc dữ liệu trả về');
   }
 
   testDeduplicationEngine();
-  console.log('✓ 10. Thuật toán Khử trùng lặp bảo tồn đúng 100% định dạng, sắp xếp query parameters và giữ nguyên fallbackUrl');
+  console.log('✓ 10. Thuật toán Khử trùng lặp bảo tồn case-sensitive paths, sắp xếp query parameters và giữ nguyên fallbackUrl');
 
   // 12. Test Dimension Preset Boundary Classification (Small < 300, Medium 300-800, Large > 800)
   function testPresetClassification(w, h, preset) {

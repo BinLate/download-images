@@ -145,7 +145,7 @@
     if (url.startsWith('data:')) return url;
     try {
       const parsed = new URL(url);
-      let path = parsed.pathname.toLowerCase();
+      let path = parsed.pathname; // Giữ nguyên case của pathname (URL path có tính phân biệt hoa/thường)
       // Bỏ đuôi kích thước responsive: -1024x768 hoặc -scaled (giữ nguyên phần mở rộng .jpg/.png)
       path = path.replace(/(?:-\d{2,4}x\d{2,4}|-scaled)(?=\.[a-z0-9]+$)/i, '');
       
@@ -153,15 +153,15 @@
       let queryString = '';
       if (parsed.search) {
         const cleanParams = new URLSearchParams(parsed.search);
-        ['w', 'width', 'h', 'height', 'resize', 'maxwidth', 'maxheight', 'fit', 'crop'].forEach(p => {
+        ['w', 'width', 'h', 'height', 'resize', 'maxwidth', 'maxheight'].forEach(p => {
           cleanParams.delete(p);
         });
         cleanParams.sort();
         queryString = cleanParams.toString();
       }
-      return `${parsed.origin}${path}${queryString ? '?' + queryString : ''}`;
+      return `${parsed.origin.toLowerCase()}${path}${queryString ? '?' + queryString : ''}`;
     } catch {
-      return url.toLowerCase();
+      return url;
     }
   }
 
@@ -508,7 +508,7 @@
         const content = meta.getAttribute('content');
         if (content) {
           addCandidateImage({
-            url: getOriginalUnscaledUrl(content),
+            url: content,
             width: 0,
             height: 0,
             alt: meta.getAttribute('property') || meta.getAttribute('name') || 'Meta Image',
@@ -536,9 +536,10 @@
       // Ignore head query errors
     }
 
-    // Trả về danh sách ảnh đã được khử trùng lặp và làm sạch hoàn toàn
+    // Trả về danh sách ảnh đã được khử trùng lặp và làm sạch hoàn toàn kèm fallbackUrl
     return Array.from(rawImagesMap.values()).map(item => ({
       url: item.url,
+      fallbackUrl: item.fallbackUrl || item.url,
       width: item.width,
       height: item.height,
       alt: item.alt,
