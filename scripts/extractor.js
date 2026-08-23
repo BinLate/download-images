@@ -149,7 +149,17 @@
       path = path.replace(/(?:-\d{2,4}x\d{2,4}|-scaled)(?=\.[a-z0-9]+$)/i, '');
       // Bỏ phần mở rộng đuôi file để match giữa .webp và .jpg/.png của cùng 1 gốc
       path = path.replace(/\.(?:jpg|jpeg|png|webp|avif|gif)$/i, '');
-      return `${parsed.origin}${path}`;
+      
+      // Giữ lại các query param định danh, loại bỏ params resize/crop/format
+      let queryString = '';
+      if (parsed.search) {
+        const cleanParams = new URLSearchParams(parsed.search);
+        ['w', 'width', 'h', 'height', 'resize', 'fit', 'crop', 'size', 'maxwidth', 'maxheight', 'quality', 'q', 'format', 'auto'].forEach(p => {
+          cleanParams.delete(p);
+        });
+        queryString = cleanParams.toString();
+      }
+      return `${parsed.origin}${path}${queryString ? '?' + queryString : ''}`;
     } catch {
       return url.toLowerCase();
     }

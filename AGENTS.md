@@ -1,4 +1,6 @@
-﻿<!-- gemini-and-chatgpt:begin -->
+﻿
+
+<!-- gemini-and-chatgpt:begin -->
 # Gemini + ChatGPT v2 automatic engineering gate
 For every implementation, bug fix, refactor, feature, test, configuration/build, dependency, security, or architecture-related coding task, automatically apply `.agents/skills/gemini-and-chatgpt/SKILL.md`. Do not wait for the user to mention the skill.
 

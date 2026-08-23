@@ -199,7 +199,16 @@ function testExtension() {
         let path = parsed.pathname.toLowerCase();
         path = path.replace(/(?:-\d{2,4}x\d{2,4}|-scaled)(?=\.[a-z0-9]+$)/i, '');
         path = path.replace(/\.(?:jpg|jpeg|png|webp|avif|gif)$/i, '');
-        return `${parsed.origin}${path}`;
+        
+        let queryString = '';
+        if (parsed.search) {
+          const cleanParams = new URLSearchParams(parsed.search);
+          ['w', 'width', 'h', 'height', 'resize', 'fit', 'crop', 'size', 'maxwidth', 'maxheight', 'quality', 'q', 'format', 'auto'].forEach(p => {
+            cleanParams.delete(p);
+          });
+          queryString = cleanParams.toString();
+        }
+        return `${parsed.origin}${path}${queryString ? '?' + queryString : ''}`;
       } catch {
         return url.toLowerCase();
       }
@@ -228,10 +237,15 @@ function testExtension() {
       'https://phanmem.me/wp-content/uploads/2026/03/windows-11-25h2-pro-lite-d3vil-boi-jerry-xristos-pasmater.jpg',
       'Phải trả về đúng link ảnh gốc unscaled'
     );
+
+    // Verify dynamic URLs with different query params are kept distinct
+    const dynamicUrl1 = 'https://example.com/api/get-image?id=101&fit=crop&w=500';
+    const dynamicUrl2 = 'https://example.com/api/get-image?id=102&fit=crop&w=800';
+    assert.notStrictEqual(getCanonicalImageKey(dynamicUrl1), getCanonicalImageKey(dynamicUrl2), 'Hai URL có id query khác nhau phải có key khác nhau');
   }
 
   testDeduplicationEngine();
-  console.log('✓ 10. Thuật toán Khử trùng lặp thông minh & Master Image Resolution gom chuẩn 100% các biến thể srcset/responsive');
+  console.log('✓ 10. Thuật toán Khử trùng lặp thông minh & Master Image Resolution gom chuẩn 100% các biến thể srcset/responsive và phân biệt đúng ảnh động');
 
   // 12. Test Dimension Preset Boundary Classification (Small < 300, Medium 300-800, Large > 800)
   function testPresetClassification(w, h, preset) {

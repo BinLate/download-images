@@ -154,7 +154,17 @@ document.addEventListener('DOMContentLoaded', () => {
       let path = parsed.pathname.toLowerCase();
       path = path.replace(/(?:-\d{2,4}x\d{2,4}|-scaled)(?=\.[a-z0-9]+$)/i, '');
       path = path.replace(/\.(?:jpg|jpeg|png|webp|avif|gif)$/i, '');
-      return `${parsed.origin}${path}`;
+      
+      // Giữ lại các query param định danh, loại bỏ params resize/crop/format
+      let queryString = '';
+      if (parsed.search) {
+        const cleanParams = new URLSearchParams(parsed.search);
+        ['w', 'width', 'h', 'height', 'resize', 'fit', 'crop', 'size', 'maxwidth', 'maxheight', 'quality', 'q', 'format', 'auto'].forEach(p => {
+          cleanParams.delete(p);
+        });
+        queryString = cleanParams.toString();
+      }
+      return `${parsed.origin}${path}${queryString ? '?' + queryString : ''}`;
     } catch {
       return url.toLowerCase();
     }
@@ -225,16 +235,20 @@ document.addEventListener('DOMContentLoaded', () => {
         func: async () => {
           const step = 450;
           const delay = 120;
-          let currentY = 0;
-          const maxY = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
-          const maxSteps = 35;
+          const maxSteps = 45;
           let count = 0;
 
-          while (currentY < maxY && count < maxSteps) {
+          while (count < maxSteps) {
+            const prevScrollY = window.scrollY;
             window.scrollBy(0, step);
-            currentY += step;
             count++;
             await new Promise(r => setTimeout(r, delay));
+            const currentScrollY = window.scrollY;
+            const maxY = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+            // Dừng sớm nếu đã chạm đáy trang
+            if (currentScrollY + window.innerHeight >= maxY - 20 && currentScrollY === prevScrollY) {
+              break;
+            }
           }
 
           // Return back to top
@@ -613,35 +627,40 @@ document.addEventListener('DOMContentLoaded', () => {
     return false;
   }
 
-  function convertImageToBlob(url, targetMimeType = 'image/jpeg', quality = 0.92) {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => {
-        try {
-          const canvas = document.createElement('canvas');
-          canvas.width = img.naturalWidth || img.width || 300;
-          canvas.height = img.naturalHeight || img.height || 300;
-          const ctx = canvas.getContext('2d');
-          if (targetMimeType === 'image/jpeg') {
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-          }
-          ctx.drawImage(img, 0, 0);
-          canvas.toBlob((blob) => {
-            if (blob) {
-              resolve(blob);
-            } else {
-              reject(new Error('Canvas toBlob trả về null'));
+  async function convertImageToBlob(url, targetMimeType = 'image/jpeg', quality = 0.92) {
+    const sourceBlob = await fetchImageAsBlob(url);
+    const objectUrl = URL.createObjectURL(sourceBlob);
+    try {
+      return await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth || img.width || 300;
+            canvas.height = img.naturalHeight || img.height || 300;
+            const ctx = canvas.getContext('2d');
+            if (targetMimeType === 'image/jpeg') {
+              ctx.fillStyle = '#ffffff';
+              ctx.fillRect(0, 0, canvas.width, canvas.height);
             }
-          }, targetMimeType, quality);
-        } catch (err) {
-          reject(err);
-        }
-      };
-      img.onerror = () => reject(new Error('Không thể tải ảnh vào Canvas để chuyển đổi'));
-      img.src = url;
-    });
+            ctx.drawImage(img, 0, 0);
+            canvas.toBlob((blob) => {
+              if (blob) {
+                resolve(blob);
+              } else {
+                reject(new Error('Canvas toBlob trả về null'));
+              }
+            }, targetMimeType, quality);
+          } catch (err) {
+            reject(err);
+          }
+        };
+        img.onerror = () => reject(new Error('Không thể tải ảnh vào Canvas để chuyển đổi'));
+        img.src = objectUrl;
+      });
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
   }
 
   async function fetchImageAsBlob(url) {
@@ -1017,6 +1036,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     try {
       const parsed = new URL(url);
+      
+      // Check query params for common filename keys (file, filename, name, img, image)
+      const queryName = parsed.searchParams.get('file') || parsed.searchParams.get('filename') || parsed.searchParams.get('name') || parsed.searchParams.get('img');
+      if (queryName) {
+        let cleanQueryName = decodeURIComponent(queryName).split('?')[0].split('#')[0].trim();
+        if (cleanQueryName && cleanQueryName.length > 2) {
+          return cleanQueryName;
+        }
+      }
+
       const pathname = parsed.pathname;
       const segments = pathname.split('/').filter(Boolean);
       if (segments.length > 0) {
