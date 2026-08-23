@@ -325,9 +325,9 @@ document.addEventListener('DOMContentLoaded', () => {
       if (state.activePreset === 'small') {
         if (maxDim >= 300) return false;
       } else if (state.activePreset === 'medium') {
-        if (maxDim < 300 || maxDim > 900) return false;
+        if (maxDim < 300 || maxDim > 800) return false;
       } else if (state.activePreset === 'large') {
-        if (maxDim <= 900) return false;
+        if (maxDim <= 800) return false;
       } else if (state.activePreset === 'hd') {
         if (maxDim < 1080 && (w < 1920 && h < 1080)) return false;
       }

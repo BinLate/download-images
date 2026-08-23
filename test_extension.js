@@ -233,25 +233,25 @@ function testExtension() {
   testDeduplicationEngine();
   console.log('✓ 10. Thuật toán Khử trùng lặp thông minh & Master Image Resolution gom chuẩn 100% các biến thể srcset/responsive');
 
-  // 12. Test Dimension Preset Boundary Classification (Addressing ChatGPT Review Finding B001 & TEST_GAPS)
+  // 12. Test Dimension Preset Boundary Classification (Small < 300, Medium 300-800, Large > 800)
   function testPresetClassification(w, h, preset) {
     const maxDim = Math.max(w, h);
     if (preset === 'small') return maxDim < 300;
-    if (preset === 'medium') return maxDim >= 300 && maxDim <= 900;
-    if (preset === 'large') return maxDim > 900;
+    if (preset === 'medium') return maxDim >= 300 && maxDim <= 800;
+    if (preset === 'large') return maxDim > 800;
     if (preset === 'hd') return maxDim >= 1080 || (w >= 1920 && h >= 1080);
     return true;
   }
 
   assert.strictEqual(testPresetClassification(299, 200, 'small'), true, '299x200 thuộc Small (<300px)');
   assert.strictEqual(testPresetClassification(300, 200, 'small'), false, '300x200 không thuộc Small');
-  assert.strictEqual(testPresetClassification(300, 300, 'medium'), true, '300x300 thuộc Medium (300-900px)');
-  assert.strictEqual(testPresetClassification(900, 600, 'medium'), true, '900x600 thuộc Medium (300-900px)');
-  assert.strictEqual(testPresetClassification(900, 600, 'large'), false, '900x600 không thuộc Large (>900px)');
-  assert.strictEqual(testPresetClassification(901, 500, 'large'), true, '901x500 thuộc Large (>900px)');
-  assert.strictEqual(testPresetClassification(1200, 500, 'large'), true, '1200x500 thuộc Large (>900px)');
+  assert.strictEqual(testPresetClassification(300, 300, 'medium'), true, '300x300 thuộc Medium (300-800px)');
+  assert.strictEqual(testPresetClassification(800, 600, 'medium'), true, '800x600 thuộc Medium (300-800px)');
+  assert.strictEqual(testPresetClassification(800, 600, 'large'), false, '800x600 không thuộc Large (>800px)');
+  assert.strictEqual(testPresetClassification(801, 500, 'large'), true, '801x500 thuộc Large (>800px)');
+  assert.strictEqual(testPresetClassification(1200, 500, 'large'), true, '1200x500 thuộc Large (>800px)');
   assert.strictEqual(testPresetClassification(1200, 500, 'medium'), false, '1200x500 không thuộc Medium');
-  console.log('✓ 11. Kiểm thử phân loại kích thước chính xác tuyệt đối theo biên (Small < 300, Medium 300-900, Large > 900)');
+  console.log('✓ 11. Kiểm thử phân loại kích thước chính xác tuyệt đối theo biên (Small < 300, Medium 300-800, Large > 800)');
 
   console.log('\n--- TOÀN BỘ KIỂM TRA EXTENSION THÀNH CÔNG 100%! ---');
 }
