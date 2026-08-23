@@ -320,15 +320,16 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       }
 
-      // 3. Preset Filter
+      // 3. Preset Filter (Normalized by maximum dimension for mutually exclusive classification)
+      const maxDim = Math.max(w, h);
       if (state.activePreset === 'small') {
-        if (w >= 300 || h >= 300) return false;
+        if (maxDim >= 300) return false;
       } else if (state.activePreset === 'medium') {
-        if ((w < 300 && h < 300) || (w > 900 && h > 900)) return false;
+        if (maxDim < 300 || maxDim > 900) return false;
       } else if (state.activePreset === 'large') {
-        if (w < 900 && h < 900) return false;
+        if (maxDim <= 900) return false;
       } else if (state.activePreset === 'hd') {
-        if (w < 1920 && h < 1080) return false;
+        if (maxDim < 1080 && (w < 1920 && h < 1080)) return false;
       }
 
       // 4. Aspect Ratio Filter
