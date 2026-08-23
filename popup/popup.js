@@ -322,11 +322,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // 3. Preset Filter
       if (state.activePreset === 'small') {
-        if (w > 200 || h > 200) return false;
+        if (w >= 300 || h >= 300) return false;
       } else if (state.activePreset === 'medium') {
-        if ((w < 200 && h < 200) || (w > 800 && h > 800)) return false;
+        if ((w < 300 && h < 300) || (w > 900 && h > 900)) return false;
       } else if (state.activePreset === 'large') {
-        if (w < 800 && h < 800) return false;
+        if (w < 900 && h < 900) return false;
       } else if (state.activePreset === 'hd') {
         if (w < 1920 && h < 1080) return false;
       }
