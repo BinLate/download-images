@@ -137,7 +137,8 @@
   }
 
   /**
-   * Tạo khóa nhận diện canonical base cho ảnh để gom nhóm các phiên bản WebP/JPG/Thumbnails của cùng 1 ảnh
+   * Tạo khóa nhận diện canonical base cho ảnh để gom nhóm các phiên bản responsive của cùng 1 ảnh
+   * (Giữ nguyên đuôi file để phân biệt .png và .jpg, chỉ bỏ suffix responsive -WxH và params kích thước)
    */
   function getCanonicalImageKey(url) {
     if (!url || typeof url !== 'string') return '';
@@ -145,16 +146,14 @@
     try {
       const parsed = new URL(url);
       let path = parsed.pathname.toLowerCase();
-      // Bỏ đuôi kích thước -WxH hoặc -scaled
+      // Bỏ đuôi kích thước responsive: -1024x768 hoặc -scaled (giữ nguyên phần mở rộng .jpg/.png)
       path = path.replace(/(?:-\d{2,4}x\d{2,4}|-scaled)(?=\.[a-z0-9]+$)/i, '');
-      // Bỏ phần mở rộng đuôi file để match giữa .webp và .jpg/.png của cùng 1 gốc
-      path = path.replace(/\.(?:jpg|jpeg|png|webp|avif|gif)$/i, '');
       
-      // Giữ lại các query param định danh, loại bỏ params resize/crop/format
+      // Chỉ loại bỏ các query param thuần kích thước/resize, giữ nguyên identity params
       let queryString = '';
       if (parsed.search) {
         const cleanParams = new URLSearchParams(parsed.search);
-        ['w', 'width', 'h', 'height', 'resize', 'fit', 'crop', 'size', 'maxwidth', 'maxheight', 'quality', 'q', 'format', 'auto'].forEach(p => {
+        ['w', 'width', 'h', 'height', 'resize', 'maxwidth', 'maxheight', 'fit', 'crop'].forEach(p => {
           cleanParams.delete(p);
         });
         queryString = cleanParams.toString();
@@ -190,6 +189,7 @@
       if (!existing) {
         rawImagesMap.set(canonicalKey, {
           url: cleanUrl,
+          fallbackUrl: cleanUrl,
           canonicalKey: canonicalKey,
           width: width,
           height: height,
@@ -199,14 +199,13 @@
           priority: item.priority || 1
         });
       } else {
-        // Nếu tìm thấy phiên bản tốt hơn (độ phân giải cao hơn, ảnh gốc unscaled, hoặc link href gốc)
+        // Nếu tìm thấy phiên bản tốt hơn (độ phân giải cao hơn hoặc priority cao hơn)
         const isHigherRes = (width * height) > (existing.width * existing.height);
         const isBetterPriority = (item.priority || 1) > (existing.priority || 1);
-        const isUnscaledOriginal = cleanUrl === getOriginalUnscaledUrl(cleanUrl) && existing.url !== getOriginalUnscaledUrl(existing.url);
         
-        // Ưu tiên định dạng gốc JPG/PNG hoặc ảnh có kích thước đo được lớn hơn
-        if (isHigherRes || isBetterPriority || isUnscaledOriginal) {
+        if (isHigherRes || isBetterPriority) {
           existing.url = cleanUrl;
+          existing.fallbackUrl = cleanUrl;
           if (width > 0) existing.width = width;
           if (height > 0) existing.height = height;
           if (!existing.alt && alt) existing.alt = alt;

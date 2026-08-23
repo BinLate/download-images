@@ -152,14 +152,14 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const parsed = new URL(url);
       let path = parsed.pathname.toLowerCase();
+      // Bỏ đuôi kích thước responsive: -1024x768 hoặc -scaled (giữ nguyên phần mở rộng .jpg/.png)
       path = path.replace(/(?:-\d{2,4}x\d{2,4}|-scaled)(?=\.[a-z0-9]+$)/i, '');
-      path = path.replace(/\.(?:jpg|jpeg|png|webp|avif|gif)$/i, '');
       
-      // Giữ lại các query param định danh, loại bỏ params resize/crop/format
+      // Chỉ loại bỏ các query param thuần kích thước/resize, giữ nguyên identity params
       let queryString = '';
       if (parsed.search) {
         const cleanParams = new URLSearchParams(parsed.search);
-        ['w', 'width', 'h', 'height', 'resize', 'fit', 'crop', 'size', 'maxwidth', 'maxheight', 'quality', 'q', 'format', 'auto'].forEach(p => {
+        ['w', 'width', 'h', 'height', 'resize', 'maxwidth', 'maxheight', 'fit', 'crop'].forEach(p => {
           cleanParams.delete(p);
         });
         queryString = cleanParams.toString();
@@ -235,20 +235,28 @@ document.addEventListener('DOMContentLoaded', () => {
         func: async () => {
           const step = 450;
           const delay = 120;
-          const maxSteps = 45;
+          let noGrowthCount = 0;
+          let lastHeight = 0;
           let count = 0;
+          const maxSteps = 150; // Safety ceiling
 
           while (count < maxSteps) {
-            const prevScrollY = window.scrollY;
             window.scrollBy(0, step);
             count++;
             await new Promise(r => setTimeout(r, delay));
+            const currentHeight = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
             const currentScrollY = window.scrollY;
-            const maxY = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
-            // Dừng sớm nếu đã chạm đáy trang
-            if (currentScrollY + window.innerHeight >= maxY - 20 && currentScrollY === prevScrollY) {
-              break;
+
+            // Check if page reached bottom and stopped growing
+            if (currentScrollY + window.innerHeight >= currentHeight - 20) {
+              if (currentHeight === lastHeight) {
+                noGrowthCount++;
+                if (noGrowthCount >= 3) break; // True bottom reached
+              } else {
+                noGrowthCount = 0;
+              }
             }
+            lastHeight = currentHeight;
           }
 
           // Return back to top
@@ -346,12 +354,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (maxDim < 1080 && (w < 1920 && h < 1080)) return false;
       }
 
-      // 4. Aspect Ratio Filter
+      // 4. Aspect Ratio Filter (Mutually Exclusive)
       if (state.activeRatio !== 'ALL' && w > 0 && h > 0) {
         const ratio = w / h;
-        if (state.activeRatio === 'LANDSCAPE' && ratio < 1.15) return false;
-        if (state.activeRatio === 'PORTRAIT' && ratio > 0.87) return false;
-        if (state.activeRatio === 'SQUARE' && (ratio < 0.85 || ratio > 1.18)) return false;
+        if (state.activeRatio === 'LANDSCAPE' && ratio <= 1.15) return false;
+        if (state.activeRatio === 'PORTRAIT' && ratio >= 0.85) return false;
+        if (state.activeRatio === 'SQUARE' && (ratio < 0.85 || ratio > 1.15)) return false;
       }
 
       // 5. Custom Dimension Filter
@@ -965,6 +973,7 @@ document.addEventListener('DOMContentLoaded', () => {
             conflictAction: 'uniquify',
             saveAs: false
           }, (downloadId) => {
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
             if (chrome.runtime.lastError || !downloadId) {
               reject(chrome.runtime.lastError || new Error('Download failed'));
             } else {

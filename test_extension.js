@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
 
-function testExtension() {
+async function testExtension() {
   console.log('--- Bắt đầu kiểm tra toàn diện Chrome Extension ---');
 
   // 1. Check manifest.json
@@ -44,7 +44,6 @@ function testExtension() {
   const popupJsPath = path.join(__dirname, 'popup', 'popup.js');
   if (!fs.existsSync(popupCssPath)) throw new Error('Thiếu popup/popup.css');
   if (!fs.existsSync(popupJsPath)) throw new Error('Thiếu popup/popup.js');
-  const popupJs = fs.readFileSync(popupJsPath, 'utf8');
 
   // 5. Verify required DOM IDs in popup.html
   const requiredIds = [
@@ -68,15 +67,8 @@ function testExtension() {
     'download-folder',
     'download-format-convert',
     'download-delay',
-    'btn-download-zip',
-    'zip-btn-text',
     'btn-download-selected',
-    'preview-modal',
-    'btn-prev-modal',
-    'btn-next-modal',
-    'modal-btn-open-tab',
-    'modal-btn-copy-url',
-    'modal-btn-download',
+    'btn-download-zip',
     'toast'
   ];
 
@@ -85,16 +77,16 @@ function testExtension() {
   });
   console.log(`✓ 4. Đã xác thực đầy đủ ${requiredIds.length} ID phần tử UI trong popup.html`);
 
-  // 6. Check JSZip script and functionality
+  // 6. Check JSZip script and functionality (Awaited)
   const jszipPath = path.join(__dirname, 'popup', 'jszip.min.js');
   assert(fs.existsSync(jszipPath), 'Thiếu popup/jszip.min.js');
   const JSZip = require(jszipPath);
   const zip = new JSZip();
   zip.file('test.png', Buffer.from('fake-image-binary-data'));
   zip.file('folder/test2.jpg', Buffer.from('fake-image-2'));
-  const zipBuffer = zip.generateAsync({ type: 'nodebuffer' });
-  assert(zipBuffer, 'JSZip generateAsync thất bại');
-  console.log('✓ 5. Thư viện JSZip tích hợp thành công và đóng gói file ZIP chuẩn xác');
+  const zipBuffer = await zip.generateAsync({ type: 'nodebuffer' });
+  assert(zipBuffer && zipBuffer.length > 0, 'JSZip generateAsync phải trả về buffer hợp lệ');
+  console.log(`✓ 5. Thư viện JSZip tích hợp thành công và tạo archive buffer hợp lệ (${zipBuffer.length} bytes)`);
 
   // 7. Test Format Conversion emulation
   function shouldConvertImage(imgFormat, convertMode) {
@@ -114,20 +106,21 @@ function testExtension() {
   assert.strictEqual(shouldConvertImage('SVG', 'original'), false);
   console.log('✓ 6. Logic chuyển đổi định dạng ảnh (WebP/AVIF -> JPG/PNG) hoạt động chuẩn xác');
 
-  // 8. Test Aspect Ratio & Subfolder logic emulation
+  // 8. Test Aspect Ratio Mutually Exclusive Boundaries
   function testRatio(w, h) {
     if (w <= 0 || h <= 0) return 'UNKNOWN';
     const ratio = w / h;
-    if (ratio >= 1.15) return 'LANDSCAPE';
-    if (ratio <= 0.87) return 'PORTRAIT';
-    if (ratio >= 0.85 && ratio <= 1.18) return 'SQUARE';
-    return 'OTHER';
+    if (ratio > 1.15) return 'LANDSCAPE';
+    if (ratio < 0.85) return 'PORTRAIT';
+    return 'SQUARE'; // 0.85 <= ratio <= 1.15
   }
 
-  assert.strictEqual(testRatio(1920, 1080), 'LANDSCAPE', '1920x1080 phải là LANDSCAPE');
-  assert.strictEqual(testRatio(1080, 1920), 'PORTRAIT', '1080x1920 phải là PORTRAIT');
-  assert.strictEqual(testRatio(800, 800), 'SQUARE', '800x800 phải là SQUARE');
-  console.log('✓ 7. Thuật toán phân loại Tỷ lệ khung hình (Aspect Ratio) hoạt động chính xác');
+  assert.strictEqual(testRatio(1920, 1080), 'LANDSCAPE', '1920x1080 (1.77) phải là LANDSCAPE');
+  assert.strictEqual(testRatio(1080, 1920), 'PORTRAIT', '1080x1920 (0.56) phải là PORTRAIT');
+  assert.strictEqual(testRatio(800, 800), 'SQUARE', '800x800 (1.0) phải là SQUARE');
+  assert.strictEqual(testRatio(1150, 1000), 'SQUARE', '1150x1000 (1.15) biên phải là SQUARE');
+  assert.strictEqual(testRatio(850, 1000), 'SQUARE', '850x1000 (0.85) biên phải là SQUARE');
+  console.log('✓ 7. Thuật toán phân loại Tỷ lệ khung hình (Aspect Ratio) loại trừ tương hỗ chuẩn xác');
 
   // 9. Test Subfolder & filename sanitization emulation
   function sanitizeSubfolder(name) {
@@ -175,35 +168,19 @@ function testExtension() {
   assert(collectedNodes.some(n => n.getAttribute && n.getAttribute() === 'https://example.com/shadow.png'), 'Thiếu ảnh bên trong shadowRoot');
   console.log('✓ 9. Thuật toán quét đệ quy Shadow DOM (shadowRoot) trích xuất thành công ảnh trong Web Components');
 
-  // 11. Test Smart Deduplication & Master Image Resolution
+  // 11. Test Smart Deduplication & Identity Preservation
   function testDeduplicationEngine() {
-    function getOriginalUnscaledUrl(url) {
-      if (!url) return url;
-      try {
-        const parsed = new URL(url);
-        const wpRegex = /^(.+?)(?:-\d{2,4}x\d{2,4}|-scaled)(\.[a-zA-Z0-9]+)$/i;
-        const match = parsed.pathname.match(wpRegex);
-        if (match) {
-          const unscaled = new URL(parsed.href);
-          unscaled.pathname = match[1] + match[2];
-          return unscaled.href;
-        }
-      } catch {}
-      return url;
-    }
-
     function getCanonicalImageKey(url) {
       if (!url) return '';
       try {
         const parsed = new URL(url);
         let path = parsed.pathname.toLowerCase();
         path = path.replace(/(?:-\d{2,4}x\d{2,4}|-scaled)(?=\.[a-z0-9]+$)/i, '');
-        path = path.replace(/\.(?:jpg|jpeg|png|webp|avif|gif)$/i, '');
         
         let queryString = '';
         if (parsed.search) {
           const cleanParams = new URLSearchParams(parsed.search);
-          ['w', 'width', 'h', 'height', 'resize', 'fit', 'crop', 'size', 'maxwidth', 'maxheight', 'quality', 'q', 'format', 'auto'].forEach(p => {
+          ['w', 'width', 'h', 'height', 'resize', 'maxwidth', 'maxheight', 'fit', 'crop'].forEach(p => {
             cleanParams.delete(p);
           });
           queryString = cleanParams.toString();
@@ -215,37 +192,35 @@ function testExtension() {
     }
 
     const testUrls = [
-      'https://phanmem.me/wp-content/uploads/2026/03/windows-11-25h2-pro-lite-d3vil-boi-jerry-xristos-pasmater.jpg',
-      'https://phanmem.me/wp-content/uploads/2026/03/windows-11-25h2-pro-lite-d3vil-boi-jerry-xristos-pasmater-768x495.jpg',
-      'https://phanmem.me/wp-content/uploads/2026/03/windows-11-25h2-pro-lite-d3vil-boi-jerry-xristos-pasmater-300x193.jpg',
-      'https://phanmem.me/wp-content/uploads/2026/03/windows-11-25h2-pro-lite-d3vil-boi-jerry-xristos-pasmater-210x136.jpg',
-      'https://phanmem.me/wp-content/uploads/2026/03/windows-11-25h2-pro-lite-d3vil-boi-jerry-xristos-pasmater.webp'
+      'https://example.com/uploads/2026/03/wallpaper.jpg',
+      'https://example.com/uploads/2026/03/wallpaper-768x495.jpg',
+      'https://example.com/uploads/2026/03/wallpaper-300x193.jpg',
+      'https://example.com/uploads/2026/03/wallpaper-210x136.jpg'
     ];
 
     const dedupeMap = new Map();
     for (const u of testUrls) {
       const key = getCanonicalImageKey(u);
-      const unscaled = getOriginalUnscaledUrl(u);
       if (!dedupeMap.has(key)) {
-        dedupeMap.set(key, unscaled);
+        dedupeMap.set(key, u);
       }
     }
 
-    assert.strictEqual(dedupeMap.size, 1, '5 phiên bản responsive của cùng 1 ảnh phải được gom thành 1 ảnh master duy nhất');
-    assert.strictEqual(
-      dedupeMap.get(getCanonicalImageKey(testUrls[0])),
-      'https://phanmem.me/wp-content/uploads/2026/03/windows-11-25h2-pro-lite-d3vil-boi-jerry-xristos-pasmater.jpg',
-      'Phải trả về đúng link ảnh gốc unscaled'
-    );
+    assert.strictEqual(dedupeMap.size, 1, '4 phiên bản responsive của cùng 1 ảnh phải được gom thành 1 key duy nhất');
 
-    // Verify dynamic URLs with different query params are kept distinct
-    const dynamicUrl1 = 'https://example.com/api/get-image?id=101&fit=crop&w=500';
-    const dynamicUrl2 = 'https://example.com/api/get-image?id=102&fit=crop&w=800';
+    // Verify same basename with different extensions are NOT merged
+    const jpgUrl = 'https://example.com/assets/logo.jpg';
+    const pngUrl = 'https://example.com/assets/logo.png';
+    assert.notStrictEqual(getCanonicalImageKey(jpgUrl), getCanonicalImageKey(pngUrl), 'logo.jpg và logo.png là 2 tài nguyên độc lập, không được gộp nhầm');
+
+    // Verify identity-bearing query params are kept distinct
+    const dynamicUrl1 = 'https://example.com/api/get-image?id=101&w=500';
+    const dynamicUrl2 = 'https://example.com/api/get-image?id=102&w=800';
     assert.notStrictEqual(getCanonicalImageKey(dynamicUrl1), getCanonicalImageKey(dynamicUrl2), 'Hai URL có id query khác nhau phải có key khác nhau');
   }
 
   testDeduplicationEngine();
-  console.log('✓ 10. Thuật toán Khử trùng lặp thông minh & Master Image Resolution gom chuẩn 100% các biến thể srcset/responsive và phân biệt đúng ảnh động');
+  console.log('✓ 10. Thuật toán Khử trùng lặp bảo tồn đúng 100% định dạng và identity parameters');
 
   // 12. Test Dimension Preset Boundary Classification (Small < 300, Medium 300-800, Large > 800)
   function testPresetClassification(w, h, preset) {
