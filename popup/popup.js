@@ -231,10 +231,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
       setLoading(true, 'Đang tự động cuộn trang để kích hoạt Lazy-load...', 'Hệ thống đang cuộn toàn bộ trang web');
 
-      // Inject smooth auto-scroll routine into webpage
+      // Inject smooth auto-scroll routine into webpage while preserving original scroll position
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: async () => {
+          const originalScrollX = window.scrollX || window.pageXOffset || 0;
+          const originalScrollY = window.scrollY || window.pageYOffset || 0;
           const step = 450;
           const delay = 120;
           let noGrowthCount = 0;
@@ -261,8 +263,8 @@ document.addEventListener('DOMContentLoaded', () => {
             lastHeight = currentHeight;
           }
 
-          // Return back to top
-          window.scrollTo({ top: 0, behavior: 'smooth' });
+          // Return back to user's exact original scroll position
+          window.scrollTo({ left: originalScrollX, top: originalScrollY, behavior: 'smooth' });
           await new Promise(r => setTimeout(r, 250));
         }
       });
@@ -504,7 +506,11 @@ document.addEventListener('DOMContentLoaded', () => {
       const thumbImg = card.querySelector('.img-card-thumb img');
       if (thumbImg) {
         thumbImg.addEventListener('error', () => {
-          thumbImg.src = '../icons/icon48.png';
+          if (item.fallbackUrl && item.fallbackUrl !== item.url && thumbImg.src !== item.fallbackUrl) {
+            thumbImg.src = item.fallbackUrl;
+          } else {
+            thumbImg.src = '../icons/icon48.png';
+          }
         }, { once: true });
       }
 
@@ -620,6 +626,7 @@ document.addEventListener('DOMContentLoaded', () => {
       filename: filename,
       saveAs: true
     }, () => {
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
       showToast(`Đã xuất danh sách ${urls.length} link ảnh`);
     });
   }
@@ -682,15 +689,25 @@ document.addEventListener('DOMContentLoaded', () => {
       const res = await fetch(url);
       return await res.blob();
     }
+
+    // Try credential-aware cross-origin fetch first, fallback gracefully
+    const tryFetch = async (fetchUrl) => {
+      try {
+        const response = await fetch(fetchUrl, { credentials: 'include' });
+        if (response.ok) return await response.blob();
+      } catch { }
+      // Fallback without explicit credentials
+      const resFallback = await fetch(fetchUrl);
+      if (!resFallback.ok) throw new Error(`HTTP error ${resFallback.status}`);
+      return await resFallback.blob();
+    };
+
     try {
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP error ${response.status}`);
-      return await response.blob();
+      return await tryFetch(url);
     } catch (err) {
       if (fallbackUrl && fallbackUrl !== url) {
         try {
-          const fallbackResp = await fetch(fallbackUrl);
-          if (fallbackResp.ok) return await fallbackResp.blob();
+          return await tryFetch(fallbackUrl);
         } catch { }
       }
       throw err;
