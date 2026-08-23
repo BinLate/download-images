@@ -1,6 +1,6 @@
 {
   "schema_version": "2.0.0",
-  "state_path": ".ai/tasks/T-20260823-001-add-zip-download-and-format-conversion/state.json",
-  "task_id": "T-20260823-001-add-zip-download-and-format-conversion",
-  "updated_at": "2026-08-23T11:14:10.061714+00:00"
+  "state_path": ".ai/tasks/T-20260823-003-support-recursive-shadow-dom-extraction/state.json",
+  "task_id": "T-20260823-003-support-recursive-shadow-dom-extraction",
+  "updated_at": "2026-08-23T11:22:48.486222+00:00"
 }

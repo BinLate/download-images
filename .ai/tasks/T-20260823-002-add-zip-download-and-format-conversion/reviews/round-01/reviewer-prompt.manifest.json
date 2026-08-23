@@ -1,0 +1,27 @@
+{
+  "package_kind": "gemini_chatgpt_independent_review_v2",
+  "manifest_version": 1,
+  "prompt_id": "342288da5685b2b9a75e8d83",
+  "target_head_sha": "90ee10e3c85af07879663dc7a8be6ac022f61142",
+  "canonical_sha256": "4ece8ef27946950c07615b482a88b4f814ad6610d8d336e70ebf58d753dd57c6",
+  "canonical_chars": 7789,
+  "canonical_lines": 173,
+  "required_sections": [
+    "# Independent Review Package",
+    "## Language policy",
+    "## Task identity",
+    "## Goal",
+    "## In scope",
+    "## Out of scope",
+    "## Acceptance criteria",
+    "## Material constraints and assumptions",
+    "## Implementation summary",
+    "## Planner work-item summary",
+    "## Pull request identity",
+    "## Verification evidence bound to TARGET_HEAD_SHA",
+    "## Prior blocking findings / dispositions",
+    "## Changed-file / diff context",
+    "## Reviewer contract",
+    "## Binding instruction"
+  ]
+}

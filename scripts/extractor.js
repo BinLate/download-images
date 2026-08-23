@@ -106,60 +106,94 @@
       }
     }
 
-    // 1. Quét thẻ <img>
-    const imgElements = document.querySelectorAll('img');
-    imgElements.forEach((img) => {
-      const src = img.currentSrc || img.src || img.getAttribute('src');
-      const naturalWidth = img.naturalWidth || img.width || img.clientWidth || 0;
-      const naturalHeight = img.naturalHeight || img.height || img.clientHeight || 0;
-      const alt = img.alt || img.getAttribute('aria-label') || img.title || '';
+    // Helper function to recursively collect all elements across Light DOM and Shadow DOM
+    function getAllDomNodes(root = document) {
+      const collected = [];
+      const visitedRoots = new Set();
 
-      if (src) {
-        addImage(src, naturalWidth, naturalHeight, alt, 'img');
-      }
+      function traverse(node) {
+        if (!node) return;
 
-      // Check lazy-load attributes
-      const lazyAttrs = ['data-src', 'data-original', 'data-url', 'data-lazy-src', 'data-high-res-src', 'data-srcset'];
-      for (const attr of lazyAttrs) {
-        const lazySrc = img.getAttribute(attr);
-        if (lazySrc) {
-          if (attr === 'data-srcset') {
-            const parsed = parseSrcset(lazySrc);
-            parsed.forEach(u => addImage(u, naturalWidth, naturalHeight, alt, 'img-lazy-srcset'));
-          } else {
-            addImage(lazySrc, naturalWidth, naturalHeight, alt, 'img-lazy');
+        if (node.nodeType === 1) { // Node.ELEMENT_NODE
+          collected.push(node);
+
+          // Recursively traverse open Shadow DOM if present
+          if (node.shadowRoot && !visitedRoots.has(node.shadowRoot)) {
+            visitedRoots.add(node.shadowRoot);
+            traverse(node.shadowRoot);
+          }
+        }
+
+        const children = node.children || node.childNodes;
+        if (children) {
+          for (let i = 0; i < children.length; i++) {
+            const child = children[i];
+            if (child.nodeType === 1) {
+              traverse(child);
+            }
           }
         }
       }
 
-      // Check srcset
-      const srcset = img.getAttribute('srcset');
-      if (srcset) {
-        const srcsetUrls = parseSrcset(srcset);
-        srcsetUrls.forEach(u => addImage(u, naturalWidth, naturalHeight, alt, 'srcset'));
-      }
-    });
+      traverse(root);
+      return collected;
+    }
 
-    // 2. Quét thẻ <picture> & <source>
-    const sourceElements = document.querySelectorAll('picture source');
-    sourceElements.forEach((source) => {
-      const srcset = source.getAttribute('srcset');
-      if (srcset) {
-        const srcsetUrls = parseSrcset(srcset);
-        srcsetUrls.forEach(u => addImage(u, 0, 0, '', 'picture-source'));
-      }
-    });
+    const allElements = getAllDomNodes(document);
+    const imageExtRegex = /\.(?:jpg|jpeg|png|webp|gif|svg|avif|bmp|ico)(?:\?.*)?$/i;
 
-    // 3. Quét CSS background-image từ tất cả phần tử DOM (kèm ::before & ::after)
-    const allElements = document.querySelectorAll('*');
+    // Process all elements in Light DOM & Shadow DOM
     allElements.forEach((el) => {
-      const tagName = el.tagName.toLowerCase();
+      const tagName = (el.tagName || '').toLowerCase();
       if (tagName === 'script' || tagName === 'style' || tagName === 'noscript') return;
 
+      // 1. Thẻ <img>
+      if (tagName === 'img') {
+        const src = el.currentSrc || el.src || el.getAttribute('src');
+        const naturalWidth = el.naturalWidth || el.width || el.clientWidth || 0;
+        const naturalHeight = el.naturalHeight || el.height || el.clientHeight || 0;
+        const alt = el.alt || el.getAttribute('aria-label') || el.title || '';
+
+        if (src) {
+          addImage(src, naturalWidth, naturalHeight, alt, 'img');
+        }
+
+        // Check lazy-load attributes
+        const lazyAttrs = ['data-src', 'data-original', 'data-url', 'data-lazy-src', 'data-high-res-src', 'data-srcset'];
+        for (const attr of lazyAttrs) {
+          const lazySrc = el.getAttribute(attr);
+          if (lazySrc) {
+            if (attr === 'data-srcset') {
+              const parsed = parseSrcset(lazySrc);
+              parsed.forEach(u => addImage(u, naturalWidth, naturalHeight, alt, 'img-lazy-srcset'));
+            } else {
+              addImage(lazySrc, naturalWidth, naturalHeight, alt, 'img-lazy');
+            }
+          }
+        }
+
+        // Check srcset
+        const srcset = el.getAttribute('srcset');
+        if (srcset) {
+          const srcsetUrls = parseSrcset(srcset);
+          srcsetUrls.forEach(u => addImage(u, naturalWidth, naturalHeight, alt, 'srcset'));
+        }
+      }
+
+      // 2. Thẻ <picture> & <source>
+      if (tagName === 'source' && el.parentElement && el.parentElement.tagName.toLowerCase() === 'picture') {
+        const srcset = el.getAttribute('srcset');
+        if (srcset) {
+          const srcsetUrls = parseSrcset(srcset);
+          srcsetUrls.forEach(u => addImage(u, 0, 0, '', 'picture-source'));
+        }
+      }
+
+      // 3. CSS background-image (kèm ::before & ::after pseudo-elements)
       try {
-        const rect = el.getBoundingClientRect();
-        const w = Math.round(rect.width);
-        const h = Math.round(rect.height);
+        const rect = el.getBoundingClientRect ? el.getBoundingClientRect() : { width: 0, height: 0 };
+        const w = Math.round(rect.width || 0);
+        const h = Math.round(rect.height || 0);
 
         // Main element background
         const style = window.getComputedStyle(el);
@@ -187,90 +221,88 @@
       } catch {
         // Skip un-computable elements
       }
-    });
 
-    // 4. Quét thẻ <meta> OpenGraph / Twitter Card & <link>
-    const metaElements = document.querySelectorAll('meta[property*="image"], meta[name*="image"], meta[itemprop="image"]');
-    metaElements.forEach((meta) => {
-      const content = meta.getAttribute('content');
-      if (content) {
-        addImage(content, 0, 0, meta.getAttribute('property') || meta.getAttribute('name') || 'Meta Image', 'meta-tag');
-      }
-    });
-
-    const linkIcons = document.querySelectorAll('link[rel*="icon"], link[rel="image_src"], link[rel*="apple-touch-icon"]');
-    linkIcons.forEach((link) => {
-      const href = link.getAttribute('href');
-      if (href) {
-        addImage(href, 0, 0, link.getAttribute('rel') || 'Link Icon', 'link-tag');
-      }
-    });
-
-    // 5. Quét thẻ <input type="image">
-    const inputImages = document.querySelectorAll('input[type="image"]');
-    inputImages.forEach((inp) => {
-      const src = inp.getAttribute('src');
-      if (src) {
-        const w = inp.naturalWidth || inp.width || inp.clientWidth || 0;
-        const h = inp.naturalHeight || inp.height || inp.clientHeight || 0;
-        addImage(src, w, h, inp.alt || 'Input Image', 'input-image');
-      }
-    });
-
-    // 6. Quét thẻ <video poster="...">
-    const videoElements = document.querySelectorAll('video[poster]');
-    videoElements.forEach((video) => {
-      const poster = video.getAttribute('poster');
-      if (poster) {
-        const w = video.videoWidth || video.clientWidth || 0;
-        const h = video.videoHeight || video.clientHeight || 0;
-        addImage(poster, w, h, 'Video Poster', 'video-poster');
-      }
-    });
-
-    // 7. Quét thẻ <a href="..."> liên kết trực tiếp tới file ảnh
-    const anchorElements = document.querySelectorAll('a[href]');
-    const imageExtRegex = /\.(?:jpg|jpeg|png|webp|gif|svg|avif|bmp|ico)(?:\?.*)?$/i;
-    anchorElements.forEach((a) => {
-      const href = a.getAttribute('href');
-      if (href && imageExtRegex.test(href)) {
-        addImage(href, 0, 0, a.textContent || 'Link Image', 'anchor-link');
-      }
-    });
-
-    // 8. Quét thẻ <canvas>
-    const canvasElements = document.querySelectorAll('canvas');
-    canvasElements.forEach((canvas) => {
-      try {
-        if (canvas.width > 30 && canvas.height > 30) {
-          const dataUrl = canvas.toDataURL('image/png');
-          addImage(dataUrl, canvas.width, canvas.height, 'Canvas Image', 'canvas');
+      // 4. Thẻ <input type="image">
+      if (tagName === 'input' && el.type === 'image') {
+        const src = el.getAttribute('src');
+        if (src) {
+          const w = el.naturalWidth || el.width || el.clientWidth || 0;
+          const h = el.naturalHeight || el.height || el.clientHeight || 0;
+          addImage(src, w, h, el.alt || 'Input Image', 'input-image');
         }
-      } catch {
-        // Tainted canvas security error
       }
-    });
 
-    // 9. Inline <svg> tags (nếu có kích thước đủ lớn > 32px)
-    const svgElements = document.querySelectorAll('svg');
-    svgElements.forEach((svg) => {
-      try {
-        const rect = svg.getBoundingClientRect();
-        const w = Math.round(rect.width);
-        const h = Math.round(rect.height);
-        if (w >= 32 && h >= 32) {
-          const serializer = new XMLSerializer();
-          let svgStr = serializer.serializeToString(svg);
-          if (!svgStr.match(/^<svg[^>]+xmlns="http:\/\/www\.w3\.org\/2000\/svg"/)) {
-            svgStr = svgStr.replace(/^<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');
+      // 5. Thẻ <video poster="...">
+      if (tagName === 'video') {
+        const poster = el.getAttribute('poster');
+        if (poster) {
+          const w = el.videoWidth || el.clientWidth || 0;
+          const h = el.videoHeight || el.clientHeight || 0;
+          addImage(poster, w, h, 'Video Poster', 'video-poster');
+        }
+      }
+
+      // 6. Thẻ <a href="..."> liên kết trực tiếp tới file ảnh
+      if (tagName === 'a') {
+        const href = el.getAttribute('href');
+        if (href && imageExtRegex.test(href)) {
+          addImage(href, 0, 0, el.textContent || 'Link Image', 'anchor-link');
+        }
+      }
+
+      // 7. Thẻ <canvas>
+      if (tagName === 'canvas') {
+        try {
+          if (el.width > 30 && el.height > 30) {
+            const dataUrl = el.toDataURL('image/png');
+            addImage(dataUrl, el.width, el.height, 'Canvas Image', 'canvas');
           }
-          const svgDataUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgStr);
-          addImage(svgDataUrl, w, h, 'SVG Vector', 'svg-inline');
+        } catch {
+          // Tainted canvas security error
         }
-      } catch {
-        // Ignore serialization issues
+      }
+
+      // 8. Inline <svg> tags
+      if (tagName === 'svg') {
+        try {
+          const rect = el.getBoundingClientRect ? el.getBoundingClientRect() : { width: 0, height: 0 };
+          const w = Math.round(rect.width || 0);
+          const h = Math.round(rect.height || 0);
+          if (w >= 32 && h >= 32) {
+            const serializer = new XMLSerializer();
+            let svgStr = serializer.serializeToString(el);
+            if (!svgStr.match(/^<svg[^>]+xmlns="http:\/\/www\.w3\.org\/2000\/svg"/)) {
+              svgStr = svgStr.replace(/^<svg/, '<svg xmlns="http://www.w3.org/2000/svg"');
+            }
+            const svgDataUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgStr);
+            addImage(svgDataUrl, w, h, 'SVG Vector', 'svg-inline');
+          }
+        } catch {
+          // Ignore serialization issues
+        }
       }
     });
+
+    // 9. Quét thẻ <meta> OpenGraph / Twitter Card & <link> trên Document
+    try {
+      const metaElements = document.querySelectorAll('meta[property*="image"], meta[name*="image"], meta[itemprop="image"]');
+      metaElements.forEach((meta) => {
+        const content = meta.getAttribute('content');
+        if (content) {
+          addImage(content, 0, 0, meta.getAttribute('property') || meta.getAttribute('name') || 'Meta Image', 'meta-tag');
+        }
+      });
+
+      const linkIcons = document.querySelectorAll('link[rel*="icon"], link[rel="image_src"], link[rel*="apple-touch-icon"]');
+      linkIcons.forEach((link) => {
+        const href = link.getAttribute('href');
+        if (href) {
+          addImage(href, 0, 0, link.getAttribute('rel') || 'Link Icon', 'link-tag');
+        }
+      });
+    } catch {
+      // Ignore head query errors
+    }
 
     return Array.from(imagesMap.values());
   }

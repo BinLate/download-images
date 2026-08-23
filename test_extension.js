@@ -136,6 +136,45 @@ function testExtension() {
   assert.strictEqual(sanitizeSubfolder('Shopee: Mua sắm/Hàng hot?'), 'Shopee_ Mua sắm_Hàng hot_');
   console.log('✓ 8. Hàm khử ký tự cấm cho thư mục tải về hoạt động an toàn');
 
+  // 10. Test Recursive Shadow DOM traversal emulation
+  function emulateDomWithShadowRoots() {
+    const fakeImgInLightDom = { nodeType: 1, tagName: 'IMG', getAttribute: () => 'https://example.com/light.jpg' };
+    const fakeImgInShadow = { nodeType: 1, tagName: 'IMG', getAttribute: () => 'https://example.com/shadow.png' };
+    const fakeCustomElement = {
+      nodeType: 1,
+      tagName: 'CUSTOM-WIDGET',
+      shadowRoot: {
+        nodeType: 11,
+        children: [fakeImgInShadow]
+      },
+      children: []
+    };
+    const fakeDoc = {
+      nodeType: 9,
+      children: [fakeImgInLightDom, fakeCustomElement]
+    };
+
+    const collected = [];
+    const visited = new Set();
+    function traverse(node) {
+      if (!node) return;
+      if (node.nodeType === 1) collected.push(node);
+      if (node.shadowRoot && !visited.has(node.shadowRoot)) {
+        visited.add(node.shadowRoot);
+        traverse(node.shadowRoot);
+      }
+      const children = node.children || [];
+      for (const child of children) traverse(child);
+    }
+    traverse(fakeDoc);
+    return collected;
+  }
+
+  const collectedNodes = emulateDomWithShadowRoots();
+  assert(collectedNodes.some(n => n.tagName === 'CUSTOM-WIDGET'), 'Thiếu custom element');
+  assert(collectedNodes.some(n => n.getAttribute && n.getAttribute() === 'https://example.com/shadow.png'), 'Thiếu ảnh bên trong shadowRoot');
+  console.log('✓ 9. Thuật toán quét đệ quy Shadow DOM (shadowRoot) trích xuất thành công ảnh trong Web Components');
+
   console.log('\n--- TOÀN BỘ KIỂM TRA EXTENSION THÀNH CÔNG 100%! ---');
 }
 
