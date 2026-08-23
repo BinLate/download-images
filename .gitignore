@@ -1,0 +1,5 @@
+.ai/chrome-reviewer-profile/
+.ai/*.log
+.ai/*.jsonl
+__pycache__/
+*.pyc
