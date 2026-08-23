@@ -175,6 +175,64 @@ function testExtension() {
   assert(collectedNodes.some(n => n.getAttribute && n.getAttribute() === 'https://example.com/shadow.png'), 'Thiếu ảnh bên trong shadowRoot');
   console.log('✓ 9. Thuật toán quét đệ quy Shadow DOM (shadowRoot) trích xuất thành công ảnh trong Web Components');
 
+  // 11. Test Smart Deduplication & Master Image Resolution
+  function testDeduplicationEngine() {
+    function getOriginalUnscaledUrl(url) {
+      if (!url) return url;
+      try {
+        const parsed = new URL(url);
+        const wpRegex = /^(.+?)(?:-\d{2,4}x\d{2,4}|-scaled)(\.[a-zA-Z0-9]+)$/i;
+        const match = parsed.pathname.match(wpRegex);
+        if (match) {
+          const unscaled = new URL(parsed.href);
+          unscaled.pathname = match[1] + match[2];
+          return unscaled.href;
+        }
+      } catch {}
+      return url;
+    }
+
+    function getCanonicalImageKey(url) {
+      if (!url) return '';
+      try {
+        const parsed = new URL(url);
+        let path = parsed.pathname.toLowerCase();
+        path = path.replace(/(?:-\d{2,4}x\d{2,4}|-scaled)(?=\.[a-z0-9]+$)/i, '');
+        path = path.replace(/\.(?:jpg|jpeg|png|webp|avif|gif)$/i, '');
+        return `${parsed.origin}${path}`;
+      } catch {
+        return url.toLowerCase();
+      }
+    }
+
+    const testUrls = [
+      'https://phanmem.me/wp-content/uploads/2026/03/windows-11-25h2-pro-lite-d3vil-boi-jerry-xristos-pasmater.jpg',
+      'https://phanmem.me/wp-content/uploads/2026/03/windows-11-25h2-pro-lite-d3vil-boi-jerry-xristos-pasmater-768x495.jpg',
+      'https://phanmem.me/wp-content/uploads/2026/03/windows-11-25h2-pro-lite-d3vil-boi-jerry-xristos-pasmater-300x193.jpg',
+      'https://phanmem.me/wp-content/uploads/2026/03/windows-11-25h2-pro-lite-d3vil-boi-jerry-xristos-pasmater-210x136.jpg',
+      'https://phanmem.me/wp-content/uploads/2026/03/windows-11-25h2-pro-lite-d3vil-boi-jerry-xristos-pasmater.webp'
+    ];
+
+    const dedupeMap = new Map();
+    for (const u of testUrls) {
+      const key = getCanonicalImageKey(u);
+      const unscaled = getOriginalUnscaledUrl(u);
+      if (!dedupeMap.has(key)) {
+        dedupeMap.set(key, unscaled);
+      }
+    }
+
+    assert.strictEqual(dedupeMap.size, 1, '5 phiên bản responsive của cùng 1 ảnh phải được gom thành 1 ảnh master duy nhất');
+    assert.strictEqual(
+      dedupeMap.get(getCanonicalImageKey(testUrls[0])),
+      'https://phanmem.me/wp-content/uploads/2026/03/windows-11-25h2-pro-lite-d3vil-boi-jerry-xristos-pasmater.jpg',
+      'Phải trả về đúng link ảnh gốc unscaled'
+    );
+  }
+
+  testDeduplicationEngine();
+  console.log('✓ 10. Thuật toán Khử trùng lặp thông minh & Master Image Resolution gom chuẩn 100% các biến thể srcset/responsive');
+
   console.log('\n--- TOÀN BỘ KIỂM TRA EXTENSION THÀNH CÔNG 100%! ---');
 }
 

@@ -146,20 +146,43 @@ document.addEventListener('DOMContentLoaded', () => {
         files: ['scripts/extractor.js']
       });
 
+  function getCanonicalKey(url) {
+    if (!url || typeof url !== 'string') return '';
+    if (url.startsWith('data:')) return url;
+    try {
+      const parsed = new URL(url);
+      let path = parsed.pathname.toLowerCase();
+      path = path.replace(/(?:-\d{2,4}x\d{2,4}|-scaled)(?=\.[a-z0-9]+$)/i, '');
+      path = path.replace(/\.(?:jpg|jpeg|png|webp|avif|gif)$/i, '');
+      return `${parsed.origin}${path}`;
+    } catch {
+      return url.toLowerCase();
+    }
+  }
+
       if (results && results.length > 0) {
         const aggregatedMap = new Map();
 
-        // Ghép kết quả từ tất cả các frames
+        // Ghép và khử trùng lặp thông minh từ tất cả các frames
         for (const frameResult of results) {
           if (Array.isArray(frameResult.result)) {
             for (const img of frameResult.result) {
               if (img && img.url) {
-                if (!aggregatedMap.has(img.url)) {
-                  aggregatedMap.set(img.url, img);
+                const key = getCanonicalKey(img.url);
+                if (!aggregatedMap.has(key)) {
+                  aggregatedMap.set(key, { ...img });
                 } else {
-                  const curr = aggregatedMap.get(img.url);
-                  if (img.width > curr.width) curr.width = img.width;
-                  if (img.height > curr.height) curr.height = img.height;
+                  const curr = aggregatedMap.get(key);
+                  const isNewHigherRes = ((img.width || 0) * (img.height || 0)) > ((curr.width || 0) * (curr.height || 0));
+                  if (isNewHigherRes) {
+                    curr.url = img.url;
+                    curr.width = img.width;
+                    curr.height = img.height;
+                    curr.format = img.format;
+                  } else {
+                    if ((!curr.width || curr.width === 0) && img.width > 0) curr.width = img.width;
+                    if ((!curr.height || curr.height === 0) && img.height > 0) curr.height = img.height;
+                  }
                   if (!curr.alt && img.alt) curr.alt = img.alt;
                 }
               }
