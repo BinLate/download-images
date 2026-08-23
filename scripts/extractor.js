@@ -1,6 +1,7 @@
 /**
  * Image Extractor Script for Chrome Extension
- * Quét toàn bộ hình ảnh trên trang web hiện tại: <img>, <picture>, background-image, svg, video poster, link ảnh...
+ * Quét toàn bộ hình ảnh trên trang web hiện tại: <img>, <picture>, background-image (kèm pseudo-elements),
+ * meta tags (og:image, twitter:image), link tags, video poster, a[href], input[type=image], svg, canvas...
  */
 
 (function () {
@@ -60,6 +61,20 @@
     return urls;
   }
 
+  function extractUrlsFromBgStyle(bgStyle) {
+    if (!bgStyle || bgStyle === 'none') return [];
+    const urls = [];
+    const regex = /url\((?:['"]?)(.*?)(?:['"]?)\)/gi;
+    let match;
+    while ((match = regex.exec(bgStyle)) !== null) {
+      const u = match[1];
+      if (u && !u.startsWith('data:image/svg+xml;base64,PHN2Zy')) {
+        urls.push(u);
+      }
+    }
+    return urls;
+  }
+
   function extractAllImages() {
     const imagesMap = new Map();
 
@@ -104,11 +119,16 @@
       }
 
       // Check lazy-load attributes
-      const lazyAttrs = ['data-src', 'data-original', 'data-url', 'data-lazy-src', 'data-high-res-src'];
+      const lazyAttrs = ['data-src', 'data-original', 'data-url', 'data-lazy-src', 'data-high-res-src', 'data-srcset'];
       for (const attr of lazyAttrs) {
         const lazySrc = img.getAttribute(attr);
         if (lazySrc) {
-          addImage(lazySrc, naturalWidth, naturalHeight, alt, 'img-lazy');
+          if (attr === 'data-srcset') {
+            const parsed = parseSrcset(lazySrc);
+            parsed.forEach(u => addImage(u, naturalWidth, naturalHeight, alt, 'img-lazy-srcset'));
+          } else {
+            addImage(lazySrc, naturalWidth, naturalHeight, alt, 'img-lazy');
+          }
         }
       }
 
@@ -116,7 +136,7 @@
       const srcset = img.getAttribute('srcset');
       if (srcset) {
         const srcsetUrls = parseSrcset(srcset);
-        srcsetUrls.forEach(u => addImage(u, 0, 0, alt, 'srcset'));
+        srcsetUrls.forEach(u => addImage(u, naturalWidth, naturalHeight, alt, 'srcset'));
       }
     });
 
@@ -130,36 +150,74 @@
       }
     });
 
-    // 3. Quét CSS background-image từ tất cả phần tử DOM
+    // 3. Quét CSS background-image từ tất cả phần tử DOM (kèm ::before & ::after)
     const allElements = document.querySelectorAll('*');
-    const bgUrlRegex = /url\((?:['"]?)(.*?)(?:['"]?)\)/gi;
-
     allElements.forEach((el) => {
-      // Bỏ qua thẻ script, style
       const tagName = el.tagName.toLowerCase();
       if (tagName === 'script' || tagName === 'style' || tagName === 'noscript') return;
 
       try {
+        const rect = el.getBoundingClientRect();
+        const w = Math.round(rect.width);
+        const h = Math.round(rect.height);
+
+        // Main element background
         const style = window.getComputedStyle(el);
-        const bgImage = style.backgroundImage;
+        const bgImage = style ? style.backgroundImage : null;
         if (bgImage && bgImage !== 'none') {
-          let match;
-          while ((match = bgUrlRegex.exec(bgImage)) !== null) {
-            const url = match[1];
-            if (url && !url.startsWith('data:image/svg+xml;base64,PHN2Zy')) { // bỏ qua một số data svg placeholder rác
-              const rect = el.getBoundingClientRect();
-              const w = Math.round(rect.width);
-              const h = Math.round(rect.height);
-              addImage(url, w, h, '', 'background');
-            }
-          }
+          const urls = extractUrlsFromBgStyle(bgImage);
+          urls.forEach(u => addImage(u, w, h, '', 'background'));
+        }
+
+        // ::before pseudo-element
+        const beforeStyle = window.getComputedStyle(el, '::before');
+        const beforeBg = beforeStyle ? beforeStyle.backgroundImage : null;
+        if (beforeBg && beforeBg !== 'none') {
+          const urls = extractUrlsFromBgStyle(beforeBg);
+          urls.forEach(u => addImage(u, w, h, '', 'bg-before'));
+        }
+
+        // ::after pseudo-element
+        const afterStyle = window.getComputedStyle(el, '::after');
+        const afterBg = afterStyle ? afterStyle.backgroundImage : null;
+        if (afterBg && afterBg !== 'none') {
+          const urls = extractUrlsFromBgStyle(afterBg);
+          urls.forEach(u => addImage(u, w, h, '', 'bg-after'));
         }
       } catch {
         // Skip un-computable elements
       }
     });
 
-    // 4. Quét thẻ <video poster="...">
+    // 4. Quét thẻ <meta> OpenGraph / Twitter Card & <link>
+    const metaElements = document.querySelectorAll('meta[property*="image"], meta[name*="image"], meta[itemprop="image"]');
+    metaElements.forEach((meta) => {
+      const content = meta.getAttribute('content');
+      if (content) {
+        addImage(content, 0, 0, meta.getAttribute('property') || meta.getAttribute('name') || 'Meta Image', 'meta-tag');
+      }
+    });
+
+    const linkIcons = document.querySelectorAll('link[rel*="icon"], link[rel="image_src"], link[rel*="apple-touch-icon"]');
+    linkIcons.forEach((link) => {
+      const href = link.getAttribute('href');
+      if (href) {
+        addImage(href, 0, 0, link.getAttribute('rel') || 'Link Icon', 'link-tag');
+      }
+    });
+
+    // 5. Quét thẻ <input type="image">
+    const inputImages = document.querySelectorAll('input[type="image"]');
+    inputImages.forEach((inp) => {
+      const src = inp.getAttribute('src');
+      if (src) {
+        const w = inp.naturalWidth || inp.width || inp.clientWidth || 0;
+        const h = inp.naturalHeight || inp.height || inp.clientHeight || 0;
+        addImage(src, w, h, inp.alt || 'Input Image', 'input-image');
+      }
+    });
+
+    // 6. Quét thẻ <video poster="...">
     const videoElements = document.querySelectorAll('video[poster]');
     videoElements.forEach((video) => {
       const poster = video.getAttribute('poster');
@@ -170,7 +228,7 @@
       }
     });
 
-    // 5. Quét thẻ <a href="..."> liên kết trực tiếp tới file ảnh
+    // 7. Quét thẻ <a href="..."> liên kết trực tiếp tới file ảnh
     const anchorElements = document.querySelectorAll('a[href]');
     const imageExtRegex = /\.(?:jpg|jpeg|png|webp|gif|svg|avif|bmp|ico)(?:\?.*)?$/i;
     anchorElements.forEach((a) => {
@@ -180,7 +238,7 @@
       }
     });
 
-    // 6. Quét thẻ <canvas>
+    // 8. Quét thẻ <canvas>
     const canvasElements = document.querySelectorAll('canvas');
     canvasElements.forEach((canvas) => {
       try {
@@ -193,7 +251,7 @@
       }
     });
 
-    // 7. Inline <svg> tags (nếu có kích thước đủ lớn > 32px)
+    // 9. Inline <svg> tags (nếu có kích thước đủ lớn > 32px)
     const svgElements = document.querySelectorAll('svg');
     svgElements.forEach((svg) => {
       try {
@@ -220,3 +278,4 @@
   // Cho phép gọi trực tiếp hoặc trả về kết quả cho executeScript
   return extractAllImages();
 })();
+

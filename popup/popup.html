@@ -25,6 +25,12 @@
       </div>
 
       <div class="header-actions">
+        <button id="btn-deep-scroll" class="btn-icon" title="Cuộn trang tự động để quét sâu (Lazy-load)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="7 13 12 18 17 13"/>
+            <polyline points="7 6 12 11 17 6"/>
+          </svg>
+        </button>
         <button id="btn-refresh" class="btn-icon" title="Quét lại trang hiện tại">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
@@ -38,7 +44,7 @@
 
     <!-- Filter Section -->
     <section class="filter-section">
-      <!-- Search & Quick Presets -->
+      <!-- Search & Sort Row -->
       <div class="filter-row search-row">
         <div class="search-input-wrap">
           <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -69,6 +75,15 @@
         <button class="chip" data-preset="medium">Vừa (200 - 800px)</button>
         <button class="chip" data-preset="large">Lớn (&gt; 800px)</button>
         <button class="chip" data-preset="hd">HD (&gt; 1080px)</button>
+      </div>
+
+      <!-- Aspect Ratio Filter Tabs -->
+      <div class="ratio-chips-wrap">
+        <span class="preset-label">Tỷ lệ:</span>
+        <button class="ratio-chip active" data-ratio="ALL">Tất cả</button>
+        <button class="ratio-chip" data-ratio="LANDSCAPE">Ngang (Landscape)</button>
+        <button class="ratio-chip" data-ratio="PORTRAIT">Dọc (Portrait)</button>
+        <button class="ratio-chip" data-ratio="SQUARE">Vuông (1:1)</button>
       </div>
 
       <!-- Custom Dimension Filters -->
@@ -127,6 +142,21 @@
       </div>
 
       <div class="selection-right">
+        <button id="btn-copy-urls" class="btn-sm-action" title="Sao chép toàn bộ link ảnh đã chọn">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/>
+            <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+          </svg>
+          Copy Link
+        </button>
+        <button id="btn-export-txt" class="btn-sm-action" title="Tải file .txt danh sách link đã chọn">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Xuất .txt
+        </button>
         <span id="selection-counter" class="selection-counter">Đã chọn: <strong>0</strong> / <span id="filtered-count">0</span></span>
       </div>
     </div>
@@ -136,8 +166,8 @@
       <!-- Loading State -->
       <div id="loading-state" class="state-container hidden">
         <div class="spinner"></div>
-        <p class="state-title">Đang quét hình ảnh trên trang...</p>
-        <p class="state-desc">Vui lòng chờ trong giây lát</p>
+        <p class="state-title" id="loading-title">Đang quét hình ảnh trên trang...</p>
+        <p class="state-desc" id="loading-desc">Vui lòng chờ trong giây lát</p>
       </div>
 
       <!-- Empty State -->
@@ -150,7 +180,7 @@
           </svg>
         </div>
         <p class="state-title">Không tìm thấy hình ảnh phù hợp</p>
-        <p class="state-desc">Thử điều chỉnh lại bộ lọc kích thước hoặc định dạng</p>
+        <p class="state-desc">Thử điều chỉnh lại bộ lọc kích thước, tỷ lệ hoặc định dạng</p>
         <button id="btn-empty-reset" class="btn-secondary">Xóa bộ lọc</button>
       </div>
 
@@ -175,14 +205,21 @@
 
       <!-- Action Controls -->
       <div class="footer-actions">
-        <div class="delay-setting" title="Thời gian trễ giữa mỗi ảnh để tránh nghẽn trình duyệt">
-          <label for="download-delay">Độ trễ:</label>
-          <select id="download-delay">
-            <option value="150">150 ms</option>
-            <option value="300" selected>300 ms (Chuẩn)</option>
-            <option value="500">500 ms</option>
-            <option value="1000">1000 ms (An toàn)</option>
-          </select>
+        <div class="footer-left-options">
+          <div class="folder-setting" title="Tải vào thư mục con bên trong Downloads">
+            <label for="download-folder">Thư mục:</label>
+            <input type="text" id="download-folder" placeholder="Tên thư mục con..." autocomplete="off">
+          </div>
+
+          <div class="delay-setting" title="Thời gian trễ giữa mỗi ảnh để tránh nghẽn trình duyệt">
+            <label for="download-delay">Trễ:</label>
+            <select id="download-delay">
+              <option value="150">150 ms</option>
+              <option value="300" selected>300 ms</option>
+              <option value="500">500 ms</option>
+              <option value="1000">1000 ms</option>
+            </select>
+          </div>
         </div>
 
         <div class="action-buttons">
@@ -210,6 +247,9 @@
     <!-- Fullscreen Image Preview Modal -->
     <div id="preview-modal" class="modal-backdrop hidden">
       <div class="modal-card">
+        <button id="btn-prev-modal" class="modal-nav-btn prev-btn" title="Ảnh trước (Phím ←)">&#10094;</button>
+        <button id="btn-next-modal" class="modal-nav-btn next-btn" title="Ảnh sau (Phím →)">&#10095;</button>
+
         <div class="modal-header">
           <div class="modal-title-group">
             <h3 id="modal-image-title">Chi tiết hình ảnh</h3>
@@ -237,6 +277,14 @@
           </div>
         </div>
         <div class="modal-footer">
+          <button id="modal-btn-open-tab" class="btn-secondary" title="Mở ảnh trong tab mới">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+              <polyline points="15 3 21 3 21 9"/>
+              <line x1="10" y1="14" x2="21" y2="3"/>
+            </svg>
+            Mở tab mới
+          </button>
           <button id="modal-btn-copy-url" class="btn-secondary">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/>
@@ -263,3 +311,4 @@
   <script src="popup.js"></script>
 </body>
 </html>
+

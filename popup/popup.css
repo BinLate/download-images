@@ -250,8 +250,9 @@ body {
   border-color: var(--accent-primary);
 }
 
-/* Preset Chips */
+/* Preset & Ratio Chips */
 .preset-chips-wrap,
+.ratio-chips-wrap,
 .format-chips-wrap {
   display: flex;
   align-items: center;
@@ -267,6 +268,7 @@ body {
 }
 
 .chip,
+.ratio-chip,
 .format-chip {
   padding: 3px 8px;
   font-size: 11px;
@@ -280,6 +282,7 @@ body {
 }
 
 .chip:hover,
+.ratio-chip:hover,
 .format-chip:hover {
   background: var(--bg-card-hover);
   color: var(--text-primary);
@@ -287,6 +290,7 @@ body {
 }
 
 .chip.active,
+.ratio-chip.active,
 .format-chip.active {
   background: var(--accent-primary);
   color: #fff;
@@ -458,9 +462,37 @@ body {
   color: #a5b4fc;
 }
 
+.selection-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-sm-action {
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.btn-sm-action:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+  border-color: var(--accent-primary);
+}
+
 .selection-counter {
   color: var(--text-secondary);
   font-size: 12px;
+  margin-left: 4px;
 }
 
 .selection-counter strong {
@@ -722,6 +754,39 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+}
+
+.footer-left-options {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+}
+
+.folder-setting {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex: 1;
+  max-width: 180px;
+}
+
+.folder-setting input {
+  width: 100%;
+  padding: 4px 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 11px;
+  outline: none;
+}
+
+.folder-setting input:focus {
+  border-color: var(--accent-primary);
 }
 
 .delay-setting {
@@ -828,7 +893,41 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
   animation: scaleUp 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.modal-nav-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid var(--border-color);
+  color: #fff;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  cursor: pointer;
+  z-index: 10;
+  transition: var(--transition-fast);
+}
+
+.modal-nav-btn:hover {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  transform: translateY(-50%) scale(1.1);
+}
+
+.modal-nav-btn.prev-btn {
+  left: 10px;
+}
+
+.modal-nav-btn.next-btn {
+  right: 10px;
 }
 
 .modal-header {

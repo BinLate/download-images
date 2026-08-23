@@ -1,6 +1,7 @@
 /**
  * Image Collector & Downloader Pro - Popup Controller Logic
- * Quét DOM tab hiện tại, quản lý bộ lọc kích thước, multi-select và tải xuống tuần tự.
+ * Quét DOM tab hiện tại, quản lý bộ lọc kích thước, tỷ lệ khung hình,
+ * cuộn sâu (deep scroll), multi-select, thư mục con và tải xuống tuần tự.
  */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -10,6 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
     filteredImages: [],
     selectedUrls: new Set(),
     activePreset: 'all',
+    activeRatio: 'ALL',
     activeFormat: 'ALL',
     minWidth: null,
     maxWidth: null,
@@ -17,19 +19,23 @@ document.addEventListener('DOMContentLoaded', () => {
     maxHeight: null,
     searchQuery: '',
     sortOrder: 'default',
+    downloadFolder: '',
     isDownloading: false,
     cancelRequested: false,
+    currentPreviewIndex: -1,
     currentPreviewItem: null
   };
 
   // DOM Elements
   const el = {
     totalBadge: document.getElementById('total-count-badge'),
+    btnDeepScroll: document.getElementById('btn-deep-scroll'),
     btnRefresh: document.getElementById('btn-refresh'),
     searchInput: document.getElementById('search-input'),
     btnClearSearch: document.getElementById('btn-clear-search'),
     sortSelect: document.getElementById('sort-select'),
     presetChips: document.querySelectorAll('.chip[data-preset]'),
+    ratioChips: document.querySelectorAll('.ratio-chip[data-ratio]'),
     formatChips: document.querySelectorAll('.format-chip[data-format]'),
     minWidthInput: document.getElementById('min-width'),
     maxWidthInput: document.getElementById('max-width'),
@@ -38,21 +44,28 @@ document.addEventListener('DOMContentLoaded', () => {
     btnResetFilters: document.getElementById('btn-reset-filters'),
     checkboxSelectAll: document.getElementById('checkbox-select-all'),
     btnInvertSelection: document.getElementById('btn-invert-selection'),
+    btnCopyUrls: document.getElementById('btn-copy-urls'),
+    btnExportTxt: document.getElementById('btn-export-txt'),
     selectionCounter: document.getElementById('selection-counter'),
     filteredCount: document.getElementById('filtered-count'),
     imageGrid: document.getElementById('image-grid'),
     loadingState: document.getElementById('loading-state'),
+    loadingTitle: document.getElementById('loading-title'),
+    loadingDesc: document.getElementById('loading-desc'),
     emptyState: document.getElementById('empty-state'),
     btnEmptyReset: document.getElementById('btn-empty-reset'),
     progressContainer: document.getElementById('progress-container'),
     progressStatusText: document.getElementById('progress-status-text'),
     progressPercentage: document.getElementById('progress-percentage'),
     progressBarFill: document.getElementById('progress-bar-fill'),
+    downloadFolderInput: document.getElementById('download-folder'),
     downloadDelaySelect: document.getElementById('download-delay'),
     btnDownloadSelected: document.getElementById('btn-download-selected'),
     downloadBtnText: document.getElementById('download-btn-text'),
     btnCancelDownload: document.getElementById('btn-cancel-download'),
     previewModal: document.getElementById('preview-modal'),
+    btnPrevModal: document.getElementById('btn-prev-modal'),
+    btnNextModal: document.getElementById('btn-next-modal'),
     btnCloseModal: document.getElementById('btn-close-modal'),
     modalPreviewImg: document.getElementById('modal-preview-img'),
     modalImageTitle: document.getElementById('modal-image-title'),
@@ -60,6 +73,7 @@ document.addEventListener('DOMContentLoaded', () => {
     modalFormat: document.getElementById('modal-format'),
     modalSource: document.getElementById('modal-source'),
     modalUrl: document.getElementById('modal-url'),
+    modalBtnOpenTab: document.getElementById('modal-btn-open-tab'),
     modalBtnCopyUrl: document.getElementById('modal-btn-copy-url'),
     modalBtnDownload: document.getElementById('modal-btn-download'),
     toast: document.getElementById('toast')
@@ -72,11 +86,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function init() {
     setupEventListeners();
+    await loadPreferences();
     await scanActiveTabImages();
   }
 
+  async function loadPreferences() {
+    try {
+      if (chrome.storage && chrome.storage.local) {
+        const data = await chrome.storage.local.get(['downloadFolder', 'downloadDelay']);
+        if (data.downloadFolder && el.downloadFolderInput) {
+          el.downloadFolderInput.value = data.downloadFolder;
+          state.downloadFolder = data.downloadFolder;
+        }
+        if (data.downloadDelay && el.downloadDelaySelect) {
+          el.downloadDelaySelect.value = data.downloadDelay;
+        }
+      }
+    } catch {
+      // Ignore storage errors
+    }
+  }
+
   async function scanActiveTabImages() {
-    setLoading(true);
+    setLoading(true, 'Đang quét hình ảnh trên trang...', 'Vui lòng chờ trong giây lát');
     state.allImages = [];
     state.selectedUrls.clear();
 
@@ -86,8 +118,16 @@ document.addEventListener('DOMContentLoaded', () => {
         throw new Error('Không tìm thấy tab hiện tại');
       }
 
-      // Check if URL is restricted (e.g. chrome://, edge://, about:)
-      if (tab.url.startsWith('chrome://') || tab.url.startsWith('edge://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('view-source:')) {
+      // Default folder suggestion based on tab title if input is empty
+      if (!el.downloadFolderInput.value && tab.title) {
+        const cleanTitle = tab.title.replace(/[/\\?%*:|"<>]/g, '_').trim().slice(0, 30);
+        if (cleanTitle) {
+          el.downloadFolderInput.placeholder = cleanTitle;
+        }
+      }
+
+      // Check if URL is restricted
+      if (tab.url && (tab.url.startsWith('chrome://') || tab.url.startsWith('edge://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('view-source:') || tab.url.startsWith('about:'))) {
         showToast('Không thể quét ảnh trên trang hệ thống trình duyệt');
         setLoading(false);
         render();
@@ -114,6 +154,7 @@ document.addEventListener('DOMContentLoaded', () => {
                   const curr = aggregatedMap.get(img.url);
                   if (img.width > curr.width) curr.width = img.width;
                   if (img.height > curr.height) curr.height = img.height;
+                  if (!curr.alt && img.alt) curr.alt = img.alt;
                 }
               }
             }
@@ -138,7 +179,56 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  // Deep Auto-Scroll Scan
+  async function runDeepScrollAndScan() {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab || !tab.id) {
+        showToast('Không tìm thấy tab đang mở');
+        return;
+      }
+
+      setLoading(true, 'Đang tự động cuộn trang để kích hoạt Lazy-load...', 'Hệ thống đang cuộn toàn bộ trang web');
+
+      // Inject smooth auto-scroll routine into webpage
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: async () => {
+          const step = 450;
+          const delay = 120;
+          let currentY = 0;
+          const maxY = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+          const maxSteps = 35;
+          let count = 0;
+
+          while (currentY < maxY && count < maxSteps) {
+            window.scrollBy(0, step);
+            currentY += step;
+            count++;
+            await new Promise(r => setTimeout(r, delay));
+          }
+
+          // Return back to top
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+          await new Promise(r => setTimeout(r, 250));
+        }
+      });
+
+      // Now scan images
+      await scanActiveTabImages();
+      showToast('Đã hoàn tất cuộn sâu và cập nhật danh sách ảnh!');
+    } catch (err) {
+      console.error('Deep scroll error:', err);
+      showToast('Lỗi khi cuộn trang: ' + (err.message || 'Không thành công'));
+      setLoading(false);
+      render();
+    }
+  }
+
   function measureUnresolvedImages(images) {
+    let reFilterNeeded = false;
+    let measureTimer;
+
     images.forEach(img => {
       if ((!img.width || !img.height) && img.url && !img.url.startsWith('data:image/svg+xml')) {
         const tempImg = new Image();
@@ -146,10 +236,22 @@ document.addEventListener('DOMContentLoaded', () => {
           if (tempImg.naturalWidth && tempImg.naturalHeight) {
             img.width = tempImg.naturalWidth;
             img.height = tempImg.naturalHeight;
-            // Update badge on card if rendered
+            // Update badge on card if already rendered
             const cardBadge = document.querySelector(`.img-card[data-url="${CSS.escape(img.url)}"] .card-dim-badge`);
             if (cardBadge) {
               cardBadge.textContent = `${img.width} × ${img.height}`;
+            }
+
+            // Debounce re-filter if dimension/ratio filters are active
+            if (state.minWidth || state.maxWidth || state.minHeight || state.maxHeight || state.activePreset !== 'all' || state.activeRatio !== 'ALL') {
+              reFilterNeeded = true;
+              clearTimeout(measureTimer);
+              measureTimer = setTimeout(() => {
+                if (reFilterNeeded) {
+                  applyFilters();
+                  render();
+                }
+              }, 300);
             }
           }
         };
@@ -200,7 +302,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (w < 1920 && h < 1080) return false;
       }
 
-      // 4. Custom Dimension Filter
+      // 4. Aspect Ratio Filter
+      if (state.activeRatio !== 'ALL' && w > 0 && h > 0) {
+        const ratio = w / h;
+        if (state.activeRatio === 'LANDSCAPE' && ratio < 1.15) return false;
+        if (state.activeRatio === 'PORTRAIT' && ratio > 0.87) return false;
+        if (state.activeRatio === 'SQUARE' && (ratio < 0.85 || ratio > 1.18)) return false;
+      }
+
+      // 5. Custom Dimension Filter
       if (state.minWidth !== null && w < minW) return false;
       if (state.maxWidth !== null && w > maxW) return false;
       if (state.minHeight !== null && h < minH) return false;
@@ -284,7 +394,7 @@ document.addEventListener('DOMContentLoaded', () => {
     el.imageGrid.innerHTML = '';
     const fragment = document.createDocumentFragment();
 
-    state.filteredImages.forEach(item => {
+    state.filteredImages.forEach((item, index) => {
       const isSelected = state.selectedUrls.has(item.url);
       const card = document.createElement('div');
       card.className = `img-card ${isSelected ? 'selected' : ''}`;
@@ -335,7 +445,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // Preview button click
       const btnPreview = card.querySelector('.btn-preview');
       btnPreview.addEventListener('click', () => {
-        openPreviewModal(item);
+        openPreviewModal(item, index);
       });
 
       // Single download button click
@@ -391,6 +501,53 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // =========================================================================
+  // Export & Copy URLs Logic
+  // =========================================================================
+  function getSelectedOrAllUrls() {
+    const selected = state.filteredImages.filter(img => state.selectedUrls.has(img.url));
+    const target = selected.length > 0 ? selected : state.filteredImages;
+    return target.map(img => img.url);
+  }
+
+  function copySelectedUrls() {
+    const urls = getSelectedOrAllUrls();
+    if (urls.length === 0) {
+      showToast('Không có link ảnh nào để sao chép');
+      return;
+    }
+
+    navigator.clipboard.writeText(urls.join('\n'))
+      .then(() => {
+        showToast(`Đã sao chép ${urls.length} link ảnh vào clipboard!`);
+      })
+      .catch(() => {
+        showToast('Không thể sao chép vào clipboard');
+      });
+  }
+
+  function exportSelectedUrlsTxt() {
+    const urls = getSelectedOrAllUrls();
+    if (urls.length === 0) {
+      showToast('Không có link ảnh nào để xuất');
+      return;
+    }
+
+    const content = urls.join('\r\n');
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const blobUrl = URL.createObjectURL(blob);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const filename = `image_links_${dateStr}.txt`;
+
+    chrome.downloads.download({
+      url: blobUrl,
+      filename: filename,
+      saveAs: true
+    }, () => {
+      showToast(`Đã xuất danh sách ${urls.length} link ảnh`);
+    });
+  }
+
+  // =========================================================================
   // Sequential Download Engine
   // =========================================================================
   async function startSequentialDownload() {
@@ -401,8 +558,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const delayMs = parseInt(el.downloadDelaySelect.value, 10) || 300;
+    const subfolder = getSanitizedSubfolder();
     state.isDownloading = true;
     state.cancelRequested = false;
+
+    // Save preferences
+    if (chrome.storage && chrome.storage.local) {
+      chrome.storage.local.set({
+        downloadFolder: el.downloadFolderInput.value.trim(),
+        downloadDelay: el.downloadDelaySelect.value
+      });
+    }
 
     // UI Updates
     el.progressContainer.classList.remove('hidden');
@@ -421,13 +587,17 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       const item = targetImages[i];
-      const filename = getSanitizedFilename(item, i + 1);
+      let filename = getSanitizedFilename(item, i + 1);
+      if (subfolder) {
+        filename = `${subfolder}/${filename}`;
+      }
+
       const currentIdx = i + 1;
       const total = targetImages.length;
       const percent = Math.round((currentIdx / total) * 100);
 
       // Update progress
-      el.progressStatusText.textContent = `Đang tải ${currentIdx}/${total}: ${filename}`;
+      el.progressStatusText.textContent = `Đang tải ${currentIdx}/${total}: ${getFilenameFromUrl(item.url)}`;
       el.progressPercentage.textContent = `${percent}%`;
       el.progressBarFill.style.width = `${percent}%`;
 
@@ -453,7 +623,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!state.cancelRequested) {
       el.progressStatusText.textContent = `Hoàn tất! Tải thành công ${successCount} ảnh ${failCount > 0 ? `(${failCount} lỗi)` : ''}`;
       el.progressBarFill.style.width = '100%';
-      showToast(`Đã tải thành công ${successCount} ảnh về thư mục Downloads`);
+      const destText = subfolder ? `thư mục Downloads/${subfolder}` : 'thư mục Downloads';
+      showToast(`Đã tải thành công ${successCount} ảnh về ${destText}`);
     }
 
     setTimeout(() => {
@@ -461,6 +632,12 @@ document.addEventListener('DOMContentLoaded', () => {
         el.progressContainer.classList.add('hidden');
       }
     }, 4000);
+  }
+
+  function getSanitizedSubfolder() {
+    const raw = el.downloadFolderInput.value.trim() || el.downloadFolderInput.placeholder.trim();
+    if (!raw) return '';
+    return raw.replace(/[/\\?%*:|"<>]/g, '_').trim();
   }
 
   function executeDownload(url, filename) {
@@ -493,7 +670,7 @@ document.addEventListener('DOMContentLoaded', () => {
         url: url,
         filename: filename,
         conflictAction: 'uniquify',
-        saveAs: false // Uses browser default downloads folder directly
+        saveAs: false
       }, (downloadId) => {
         if (chrome.runtime.lastError || !downloadId) {
           reject(chrome.runtime.lastError || new Error('Download failed'));
@@ -505,7 +682,11 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function downloadSingleFile(item) {
-    const filename = getSanitizedFilename(item, 1);
+    let filename = getSanitizedFilename(item, 1);
+    const subfolder = getSanitizedSubfolder();
+    if (subfolder) {
+      filename = `${subfolder}/${filename}`;
+    }
     showToast(`Đang tải: ${filename}`);
     try {
       await executeDownload(item.url, filename);
@@ -573,10 +754,15 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // =========================================================================
-  // Preview Modal
+  // Preview Modal & Navigation
   // =========================================================================
-  function openPreviewModal(item) {
+  function openPreviewModal(item, index = -1) {
+    if (index === -1) {
+      index = state.filteredImages.findIndex(i => i.url === item.url);
+    }
+    state.currentPreviewIndex = index;
     state.currentPreviewItem = item;
+
     el.modalPreviewImg.src = item.url;
     el.modalImageTitle.textContent = item.alt || getFilenameFromUrl(item.url) || 'Chi tiết hình ảnh';
     el.modalImageDimensions.textContent = (item.width > 0 && item.height > 0) ? `${item.width} × ${item.height} px` : 'Đang tải kích thước';
@@ -590,14 +776,24 @@ document.addEventListener('DOMContentLoaded', () => {
   function closePreviewModal() {
     el.previewModal.classList.add('hidden');
     state.currentPreviewItem = null;
+    state.currentPreviewIndex = -1;
+  }
+
+  function navigateModal(direction) {
+    if (state.filteredImages.length === 0 || state.currentPreviewIndex === -1) return;
+    let newIndex = state.currentPreviewIndex + direction;
+    if (newIndex < 0) newIndex = state.filteredImages.length - 1;
+    if (newIndex >= state.filteredImages.length) newIndex = 0;
+    openPreviewModal(state.filteredImages[newIndex], newIndex);
   }
 
   // =========================================================================
   // UI Event Listeners
   // =========================================================================
   function setupEventListeners() {
-    // Refresh Button
+    // Refresh Button & Deep Scroll Button
     el.btnRefresh.addEventListener('click', scanActiveTabImages);
+    el.btnDeepScroll.addEventListener('click', runDeepScrollAndScan);
 
     // Search Input with Debounce
     let searchTimer;
@@ -654,6 +850,17 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
 
+    // Ratio Chips
+    el.ratioChips.forEach(chip => {
+      chip.addEventListener('click', () => {
+        el.ratioChips.forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+        state.activeRatio = chip.dataset.ratio;
+        applyFilters();
+        render();
+      });
+    });
+
     // Format Chips
     el.formatChips.forEach(chip => {
       chip.addEventListener('click', () => {
@@ -702,8 +909,10 @@ document.addEventListener('DOMContentLoaded', () => {
       state.searchQuery = '';
       state.activeFormat = 'ALL';
       state.activePreset = 'all';
+      state.activeRatio = 'ALL';
 
       el.presetChips.forEach(c => c.classList.toggle('active', c.dataset.preset === 'all'));
+      el.ratioChips.forEach(c => c.classList.toggle('active', c.dataset.ratio === 'ALL'));
       el.formatChips.forEach(c => c.classList.toggle('active', c.dataset.format === 'ALL'));
 
       applyFilters();
@@ -713,7 +922,7 @@ document.addEventListener('DOMContentLoaded', () => {
     el.btnResetFilters.addEventListener('click', resetFilters);
     el.btnEmptyReset.addEventListener('click', resetFilters);
 
-    // Select All Checkbox
+    // Select All Checkbox & Invert
     el.checkboxSelectAll.addEventListener('change', (e) => {
       if (e.target.checked) {
         selectAllFiltered();
@@ -722,8 +931,11 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
-    // Invert Selection
     el.btnInvertSelection.addEventListener('click', invertSelectionFiltered);
+
+    // Export and Copy URLs
+    el.btnCopyUrls.addEventListener('click', copySelectedUrls);
+    el.btnExportTxt.addEventListener('click', exportSelectedUrlsTxt);
 
     // Download Button
     el.btnDownloadSelected.addEventListener('click', startSequentialDownload);
@@ -733,10 +945,25 @@ document.addEventListener('DOMContentLoaded', () => {
       state.cancelRequested = true;
     });
 
-    // Modal Events
+    // Modal Events & Navigation
     el.btnCloseModal.addEventListener('click', closePreviewModal);
+    el.btnPrevModal.addEventListener('click', (e) => {
+      e.stopPropagation();
+      navigateModal(-1);
+    });
+    el.btnNextModal.addEventListener('click', (e) => {
+      e.stopPropagation();
+      navigateModal(1);
+    });
+
     el.previewModal.addEventListener('click', (e) => {
       if (e.target === el.previewModal) closePreviewModal();
+    });
+
+    el.modalBtnOpenTab.addEventListener('click', () => {
+      if (state.currentPreviewItem && state.currentPreviewItem.url) {
+        chrome.tabs.create({ url: state.currentPreviewItem.url });
+      }
     });
 
     el.modalBtnCopyUrl.addEventListener('click', () => {
@@ -754,8 +981,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && !el.previewModal.classList.contains('hidden')) {
-        closePreviewModal();
+      if (!el.previewModal.classList.contains('hidden')) {
+        if (e.key === 'Escape') {
+          closePreviewModal();
+        } else if (e.key === 'ArrowLeft') {
+          navigateModal(-1);
+        } else if (e.key === 'ArrowRight') {
+          navigateModal(1);
+        }
       }
     });
   }
@@ -763,8 +996,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // =========================================================================
   // Helpers
   // =========================================================================
-  function setLoading(isLoading) {
+  function setLoading(isLoading, title = 'Đang quét hình ảnh trên trang...', desc = 'Vui lòng chờ trong giây lát') {
     if (isLoading) {
+      el.loadingTitle.textContent = title;
+      el.loadingDesc.textContent = desc;
       el.loadingState.classList.remove('hidden');
       el.emptyState.classList.add('hidden');
       el.imageGrid.classList.add('hidden');
@@ -794,3 +1029,4 @@ document.addEventListener('DOMContentLoaded', () => {
     })[m]);
   }
 });
+
