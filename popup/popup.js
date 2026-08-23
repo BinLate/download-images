@@ -439,17 +439,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
       card.innerHTML = `
         <div class="card-checkbox">
-          <label class="custom-checkbox" onclick="event.stopPropagation()">
+          <label class="custom-checkbox">
             <input type="checkbox" ${isSelected ? 'checked' : ''} class="item-checkbox">
-            <span class="checkmark"></span>
           </label>
         </div>
         <span class="card-dim-badge">${dimText}</span>
         <div class="img-card-thumb">
-          <img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.alt || '')}" loading="lazy" onerror="this.src='../icons/icon48.png'">
+          <img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.alt || '')}" loading="lazy">
         </div>
         <span class="card-format-badge">${item.format}</span>
-        <div class="card-actions-hover" onclick="event.stopPropagation()">
+        <div class="card-actions-hover">
           <button class="btn-card-action btn-preview" title="Xem chi tiết">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
@@ -465,6 +464,24 @@ document.addEventListener('DOMContentLoaded', () => {
           </button>
         </div>
       `;
+
+      // Prevent card selection toggle when clicking checkbox label or action buttons
+      const chkLabel = card.querySelector('.custom-checkbox');
+      if (chkLabel) {
+        chkLabel.addEventListener('click', (e) => e.stopPropagation());
+      }
+      const actionsHover = card.querySelector('.card-actions-hover');
+      if (actionsHover) {
+        actionsHover.addEventListener('click', (e) => e.stopPropagation());
+      }
+
+      // Safe fallback image on error (CSP compliant without inline onerror)
+      const thumbImg = card.querySelector('.img-card-thumb img');
+      if (thumbImg) {
+        thumbImg.addEventListener('error', () => {
+          thumbImg.src = '../icons/icon48.png';
+        }, { once: true });
+      }
 
       // Click card to toggle selection
       card.addEventListener('click', () => {
