@@ -59,7 +59,10 @@ document.addEventListener('DOMContentLoaded', () => {
     progressPercentage: document.getElementById('progress-percentage'),
     progressBarFill: document.getElementById('progress-bar-fill'),
     downloadFolderInput: document.getElementById('download-folder'),
+    downloadFormatConvert: document.getElementById('download-format-convert'),
     downloadDelaySelect: document.getElementById('download-delay'),
+    btnDownloadZip: document.getElementById('btn-download-zip'),
+    zipBtnText: document.getElementById('zip-btn-text'),
     btnDownloadSelected: document.getElementById('btn-download-selected'),
     downloadBtnText: document.getElementById('download-btn-text'),
     btnCancelDownload: document.getElementById('btn-cancel-download'),
@@ -93,13 +96,16 @@ document.addEventListener('DOMContentLoaded', () => {
   async function loadPreferences() {
     try {
       if (chrome.storage && chrome.storage.local) {
-        const data = await chrome.storage.local.get(['downloadFolder', 'downloadDelay']);
+        const data = await chrome.storage.local.get(['downloadFolder', 'downloadDelay', 'downloadFormatConvert']);
         if (data.downloadFolder && el.downloadFolderInput) {
           el.downloadFolderInput.value = data.downloadFolder;
           state.downloadFolder = data.downloadFolder;
         }
         if (data.downloadDelay && el.downloadDelaySelect) {
           el.downloadDelaySelect.value = data.downloadDelay;
+        }
+        if (data.downloadFormatConvert && el.downloadFormatConvert) {
+          el.downloadFormatConvert.value = data.downloadFormatConvert;
         }
       }
     } catch {
@@ -356,8 +362,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // Update Selection Counter
     const selectedCount = getVisibleSelectedCount();
     el.selectionCounter.innerHTML = `Đã chọn: <strong>${selectedCount}</strong> / <span>${state.filteredImages.length}</span>`;
-    el.downloadBtnText.textContent = `Tải xuống (${selectedCount} ảnh)`;
+    el.downloadBtnText.textContent = `Tải xuống (${selectedCount})`;
     el.btnDownloadSelected.disabled = selectedCount === 0 || state.isDownloading;
+    if (el.btnDownloadZip) {
+      el.btnDownloadZip.disabled = selectedCount === 0 || state.isDownloading;
+      if (el.zipBtnText) {
+        el.zipBtnText.textContent = selectedCount > 0 ? `Tải ZIP (${selectedCount})` : 'Tải ZIP';
+      }
+    }
 
     // Update Select All Checkbox
     if (state.filteredImages.length === 0) {
@@ -548,6 +560,85 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // =========================================================================
+  // Image Conversion & Payload Preparation Helpers
+  // =========================================================================
+  function shouldConvertImage(imgFormat, convertMode) {
+    if (!convertMode || convertMode === 'original') return false;
+    const fmt = (imgFormat || '').toUpperCase();
+    if (convertMode === 'webp-to-jpg' && (fmt === 'WEBP' || fmt === 'AVIF')) return 'image/jpeg';
+    if (convertMode === 'webp-to-png' && (fmt === 'WEBP' || fmt === 'AVIF')) return 'image/png';
+    if (convertMode === 'all-to-jpg' && fmt !== 'JPG') return 'image/jpeg';
+    if (convertMode === 'all-to-png' && fmt !== 'PNG') return 'image/png';
+    return false;
+  }
+
+  function convertImageToBlob(url, targetMimeType = 'image/jpeg', quality = 0.92) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth || img.width || 300;
+          canvas.height = img.naturalHeight || img.height || 300;
+          const ctx = canvas.getContext('2d');
+          if (targetMimeType === 'image/jpeg') {
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+          }
+          ctx.drawImage(img, 0, 0);
+          canvas.toBlob((blob) => {
+            if (blob) {
+              resolve(blob);
+            } else {
+              reject(new Error('Canvas toBlob trả về null'));
+            }
+          }, targetMimeType, quality);
+        } catch (err) {
+          reject(err);
+        }
+      };
+      img.onerror = () => reject(new Error('Không thể tải ảnh vào Canvas để chuyển đổi'));
+      img.src = url;
+    });
+  }
+
+  async function fetchImageAsBlob(url) {
+    if (url.startsWith('data:image/svg+xml;charset=utf-8,')) {
+      const svgContent = decodeURIComponent(url.replace('data:image/svg+xml;charset=utf-8,', ''));
+      return new Blob([svgContent], { type: 'image/svg+xml' });
+    }
+    if (url.startsWith('data:')) {
+      const res = await fetch(url);
+      return await res.blob();
+    }
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP error ${response.status}`);
+    return await response.blob();
+  }
+
+  async function prepareImagePayload(item, index = 1, convertMode = 'original') {
+    const targetMime = shouldConvertImage(item.format, convertMode);
+    let filename = getSanitizedFilename(item, index);
+
+    if (targetMime) {
+      const targetExt = targetMime === 'image/png' ? '.png' : '.jpg';
+      const nameWithoutExt = filename.replace(/\.[^/.]+$/, '');
+      filename = `${nameWithoutExt}${targetExt}`;
+
+      try {
+        const convertedBlob = await convertImageToBlob(item.url, targetMime, 0.92);
+        return { blob: convertedBlob, filename, isConverted: true };
+      } catch (e) {
+        console.warn('Chuyển đổi ảnh thất bại, dùng file gốc:', item.url, e);
+      }
+    }
+
+    const blob = await fetchImageAsBlob(item.url);
+    return { blob, filename, isConverted: false };
+  }
+
+  // =========================================================================
   // Sequential Download Engine
   // =========================================================================
   async function startSequentialDownload() {
@@ -558,6 +649,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const delayMs = parseInt(el.downloadDelaySelect.value, 10) || 300;
+    const convertMode = el.downloadFormatConvert ? el.downloadFormatConvert.value : 'original';
     const subfolder = getSanitizedSubfolder();
     state.isDownloading = true;
     state.cancelRequested = false;
@@ -566,7 +658,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (chrome.storage && chrome.storage.local) {
       chrome.storage.local.set({
         downloadFolder: el.downloadFolderInput.value.trim(),
-        downloadDelay: el.downloadDelaySelect.value
+        downloadDelay: el.downloadDelaySelect.value,
+        downloadFormatConvert: convertMode
       });
     }
 
@@ -574,6 +667,7 @@ document.addEventListener('DOMContentLoaded', () => {
     el.progressContainer.classList.remove('hidden');
     el.btnCancelDownload.classList.remove('hidden');
     el.btnDownloadSelected.disabled = true;
+    if (el.btnDownloadZip) el.btnDownloadZip.disabled = true;
     el.progressBarFill.style.width = '0%';
     el.progressPercentage.textContent = '0%';
 
@@ -587,11 +681,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       const item = targetImages[i];
-      let filename = getSanitizedFilename(item, i + 1);
-      if (subfolder) {
-        filename = `${subfolder}/${filename}`;
-      }
-
       const currentIdx = i + 1;
       const total = targetImages.length;
       const percent = Math.round((currentIdx / total) * 100);
@@ -602,11 +691,32 @@ document.addEventListener('DOMContentLoaded', () => {
       el.progressBarFill.style.width = `${percent}%`;
 
       try {
-        await executeDownload(item.url, filename);
+        const payload = await prepareImagePayload(item, currentIdx, convertMode);
+        let finalFilename = payload.filename;
+        if (subfolder) {
+          finalFilename = `${subfolder}/${finalFilename}`;
+        }
+
+        if (payload.blob) {
+          const blobUrl = URL.createObjectURL(payload.blob);
+          await executeDownload(blobUrl, finalFilename);
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
+        } else {
+          await executeDownload(item.url, finalFilename);
+        }
         successCount++;
       } catch (err) {
         console.error('Download error:', item.url, err);
-        failCount++;
+        // Fallback to original url download if payload preparation errored
+        try {
+          let fallbackName = getSanitizedFilename(item, currentIdx);
+          if (subfolder) fallbackName = `${subfolder}/${fallbackName}`;
+          await executeDownload(item.url, fallbackName);
+          successCount++;
+        } catch (fbErr) {
+          console.error('Fallback download failed:', item.url, fbErr);
+          failCount++;
+        }
       }
 
       // Delay between sequential downloads to prevent browser freezing
@@ -619,6 +729,7 @@ document.addEventListener('DOMContentLoaded', () => {
     state.isDownloading = false;
     el.btnCancelDownload.classList.add('hidden');
     el.btnDownloadSelected.disabled = false;
+    if (el.btnDownloadZip) el.btnDownloadZip.disabled = false;
 
     if (!state.cancelRequested) {
       el.progressStatusText.textContent = `Hoàn tất! Tải thành công ${successCount} ảnh ${failCount > 0 ? `(${failCount} lỗi)` : ''}`;
@@ -632,6 +743,146 @@ document.addEventListener('DOMContentLoaded', () => {
         el.progressContainer.classList.add('hidden');
       }
     }, 4000);
+  }
+
+  // =========================================================================
+  // ZIP Archive Download Engine (JSZip)
+  // =========================================================================
+  async function startZipDownload() {
+    if (typeof JSZip === 'undefined') {
+      showToast('Lỗi: Thư viện JSZip chưa được tải');
+      return;
+    }
+
+    const targetImages = state.filteredImages.filter(img => state.selectedUrls.has(img.url));
+    if (targetImages.length === 0) {
+      showToast('Vui lòng chọn ít nhất một ảnh để tải ZIP');
+      return;
+    }
+
+    const convertMode = el.downloadFormatConvert ? el.downloadFormatConvert.value : 'original';
+    const subfolder = getSanitizedSubfolder();
+    state.isDownloading = true;
+    state.cancelRequested = false;
+
+    // Save preferences
+    if (chrome.storage && chrome.storage.local) {
+      chrome.storage.local.set({
+        downloadFolder: el.downloadFolderInput.value.trim(),
+        downloadDelay: el.downloadDelaySelect.value,
+        downloadFormatConvert: convertMode
+      });
+    }
+
+    // UI Updates
+    el.progressContainer.classList.remove('hidden');
+    el.btnCancelDownload.classList.remove('hidden');
+    el.btnDownloadSelected.disabled = true;
+    if (el.btnDownloadZip) el.btnDownloadZip.disabled = true;
+    el.progressBarFill.style.width = '0%';
+    el.progressPercentage.textContent = '0%';
+    el.progressStatusText.textContent = 'Đang thu thập và nén ảnh vào file ZIP...';
+
+    const zip = new JSZip();
+    const usedNames = new Set();
+    let successCount = 0;
+    let failCount = 0;
+
+    for (let i = 0; i < targetImages.length; i++) {
+      if (state.cancelRequested) {
+        showToast('Đã dừng tiến trình nén file ZIP');
+        break;
+      }
+
+      const item = targetImages[i];
+      const currentIdx = i + 1;
+      const total = targetImages.length;
+      const percent = Math.round((currentIdx / total) * 80); // 0-80% for fetching
+
+      el.progressStatusText.textContent = `Đang tải & nén ${currentIdx}/${total}: ${getFilenameFromUrl(item.url)}`;
+      el.progressPercentage.textContent = `${percent}%`;
+      el.progressBarFill.style.width = `${percent}%`;
+
+      try {
+        const payload = await prepareImagePayload(item, currentIdx, convertMode);
+        let zipItemName = payload.filename;
+
+        // Ensure unique filename in zip
+        if (usedNames.has(zipItemName)) {
+          const parts = zipItemName.split('.');
+          const ext = parts.length > 1 ? '.' + parts.pop() : '';
+          zipItemName = `${parts.join('.')}_${currentIdx}${ext}`;
+        }
+        usedNames.add(zipItemName);
+
+        zip.file(zipItemName, payload.blob);
+        successCount++;
+      } catch (err) {
+        console.error('ZIP pack error:', item.url, err);
+        failCount++;
+      }
+    }
+
+    if (state.cancelRequested || successCount === 0) {
+      state.isDownloading = false;
+      el.btnCancelDownload.classList.add('hidden');
+      el.btnDownloadSelected.disabled = false;
+      if (el.btnDownloadZip) el.btnDownloadZip.disabled = false;
+      if (successCount === 0 && !state.cancelRequested) {
+        showToast('Không thể tải dữ liệu ảnh nào để tạo file ZIP');
+      }
+      setTimeout(() => {
+        if (!state.isDownloading) el.progressContainer.classList.add('hidden');
+      }, 3000);
+      return;
+    }
+
+    // Generate ZIP file
+    el.progressStatusText.textContent = 'Đang đóng gói file ZIP (DEFLATE)...';
+    try {
+      const zipBlob = await zip.generateAsync(
+        {
+          type: 'blob',
+          compression: 'DEFLATE',
+          compressionOptions: { level: 6 }
+        },
+        (metadata) => {
+          const packPercent = 80 + Math.round((metadata.percent / 100) * 20);
+          el.progressPercentage.textContent = `${packPercent}%`;
+          el.progressBarFill.style.width = `${packPercent}%`;
+        }
+      );
+
+      const zipUrl = URL.createObjectURL(zipBlob);
+      const dateStr = new Date().toISOString().slice(0, 10);
+      const timeStr = new Date().toTimeString().slice(0, 5).replace(':', '');
+      let zipName = subfolder ? `${subfolder}_${dateStr}_${timeStr}.zip` : `images_${dateStr}_${timeStr}.zip`;
+      if (subfolder) {
+        zipName = `${subfolder}/${zipName}`;
+      }
+
+      await executeDownload(zipUrl, zipName);
+      setTimeout(() => URL.revokeObjectURL(zipUrl), 30000);
+
+      el.progressStatusText.textContent = `Hoàn tất! Đã nén thành công ${successCount} ảnh (${(zipBlob.size / 1024 / 1024).toFixed(2)} MB)`;
+      el.progressBarFill.style.width = '100%';
+      el.progressPercentage.textContent = '100%';
+      showToast(`Đã xuất file ZIP (${successCount} ảnh) thành công!`);
+    } catch (zipErr) {
+      console.error('ZIP generation error:', zipErr);
+      showToast('Lỗi khi đóng gói file ZIP: ' + (zipErr.message || 'Thất bại'));
+    } finally {
+      state.isDownloading = false;
+      el.btnCancelDownload.classList.add('hidden');
+      el.btnDownloadSelected.disabled = false;
+      if (el.btnDownloadZip) el.btnDownloadZip.disabled = false;
+
+      setTimeout(() => {
+        if (!state.isDownloading) {
+          el.progressContainer.classList.add('hidden');
+        }
+      }, 4000);
+    }
   }
 
   function getSanitizedSubfolder() {
@@ -937,8 +1188,18 @@ document.addEventListener('DOMContentLoaded', () => {
     el.btnCopyUrls.addEventListener('click', copySelectedUrls);
     el.btnExportTxt.addEventListener('click', exportSelectedUrlsTxt);
 
-    // Download Button
+    // Download Buttons (Sequential & ZIP)
     el.btnDownloadSelected.addEventListener('click', startSequentialDownload);
+    if (el.btnDownloadZip) {
+      el.btnDownloadZip.addEventListener('click', startZipDownload);
+    }
+    if (el.downloadFormatConvert) {
+      el.downloadFormatConvert.addEventListener('change', (e) => {
+        if (chrome.storage && chrome.storage.local) {
+          chrome.storage.local.set({ downloadFormatConvert: e.target.value });
+        }
+      });
+    }
 
     // Cancel Download Button
     el.btnCancelDownload.addEventListener('click', () => {

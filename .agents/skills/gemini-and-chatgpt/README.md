@@ -6,16 +6,17 @@ Bộ này biến Antigravity thành **thợ code + điều phối**, còn ChatGP
 
 Sau khi cài một lần, bạn chỉ cần giao task code bình thường cho Antigravity. Không cần gõ `Use gemini-and-chatgpt skill` mỗi lần.
 
-## Reviewer transport hiện tại: một Browser Subagent task end-to-end
+## Reviewer transport: Mô hình Review qua Link GitHub (GitHub Link-Based Review)
 
 Sau khi PR đã OPEN và candidate SHA đã verify:
 
-1. `review_round.py prepare --root .` tạo immutable `reviewer-prompt.txt` và trả về `prompt_path`, `response_path`.
-2. Main Agent đọc **toàn bộ** `reviewer-prompt.txt` bằng `view_file`, rồi truyền nguyên văn nội dung đó vào **một** `browser_subagent` task.
-3. Browser Subagent mở/reuse ChatGPT, tạo fresh conversation, nhập toàn bộ prompt thành một draft, verify đủ BEGIN + END marker, click Send đúng một lần, chờ ChatGPT trả lời xong và trả về toàn bộ response. Nếu prompt đã nằm đầy đủ trong composer thì chỉ verify marker rồi click Send, không gõ lại.
-4. Main Agent ghi nguyên văn response vào `reviewer-response.txt`, rồi chạy `review_round.py finalize --root .` để kiểm tra exact SHA/session/manifest, parse verdict và cập nhật lifecycle.
-
-Không dùng clipboard. Không nhấn bare Enter khi đang soạn prompt. Không còn phase `transport`, không còn PowerShell/CDP browser handoff và không mở reviewer Chrome/profile riêng.
+1. `review_round.py prepare --root .` tạo gói review tinh gọn `reviewer-prompt.txt` (~8 KB) chứa:
+   - Mục tiêu / yêu cầu chi tiết của người dùng.
+   - Đường link xem code & diff trên GitHub PR (`https://github.com/.../pull/.../files`).
+   - Checklist đánh giá: Tính đúng đắn, logic tính năng, an toàn bảo mật và đề xuất tính năng bổ sung.
+2. Gói review siêu nhẹ được gửi trực tiếp sang ChatGPT Web qua Browser Subagent, CDP hoặc copy thủ công mà không gặp bất kỳ lỗi nghẽn trình duyệt hay timeout nào.
+3. ChatGPT duyệt link GitHub, rà soát toàn diện và trả về structured verdict (`APPROVED_TO_MERGE`, `REQUEST_CHANGES`,...) kèm `TARGET_HEAD_SHA`.
+4. Hệ thống ghi nhận kết quả và hoàn tất Gate an toàn.
 
 
 Luồng mặc định:

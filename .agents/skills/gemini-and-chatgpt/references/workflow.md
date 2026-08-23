@@ -66,7 +66,7 @@ Do not decompose normal work into many tiny CLI calls. Use these consolidated bo
 2. Planner/Architect commands only if classification actually requires them.
 3. After implementation and candidate commit, `python .agents/skills/gemini-and-chatgpt/scripts/orchestrator.py verify ...` — bind candidate + run required checks once.
 4. Push branch and create/update PR with Git/`gh`.
-5. Run `review_round.py prepare`, read the complete returned `prompt_path`, run one Antigravity Browser Subagent task that opens/reuses a fresh ChatGPT conversation, enters and sends the full prompt, waits for the complete response, then save that verbatim response to `response_path` and run `review_round.py finalize`.
+5. Run `python .agents/skills/gemini-and-chatgpt/scripts/review_round.py --root .` to automatically generate the lightweight, GitHub link-based review prompt (`reviewer-prompt.txt`), perform one-shot prompt submission to ChatGPT Web, collect the verdict, and update the lifecycle state to `RELEASE_GATE` or `FIXING`.
 
 Do not run `--help`, standalone `pr_context.py`, `begin-verify`, `delivery`, reviewer verifier scripts, or repeated state checks on a successful happy path. `.ai/gemini-chatgpt-actions.log` is the compact diagnostic record; logging is in-process and adds no extra shell commands.
 
@@ -88,24 +88,21 @@ The normal review path does not require a separate PR-context command. After the
 
 ## Review round
 
-The active review path is a deliberate three-step handoff:
+The review package is lightweight (~8 KB) and link-based:
 
 ```bash
-python .agents/skills/gemini-and-chatgpt/scripts/review_round.py prepare --root .
-# Main Agent reads prompt_path and gives the COMPLETE text to ONE browser_subagent task.
-# Browser Subagent opens/reuses ChatGPT, sends the full prompt, waits, and returns the full response.
-# Main Agent writes that exact response to response_path.
-python .agents/skills/gemini-and-chatgpt/scripts/review_round.py finalize --root .
+# One-shot invocation:
+python .agents/skills/gemini-and-chatgpt/scripts/review_round.py --root .
 ```
 
-`prepare` performs these deterministic steps:
+`review_round.py` performs these deterministic steps:
 
 1. Accept only `PR_PREPARING` or resumable `REVIEWING`.
 2. Use `git` + `gh` to require an OPEN PR and exact equality of local HEAD, PR HEAD, and verified candidate SHA.
 3. Sync delivery/enter `REVIEWING` when needed.
-4. Build the exact base...HEAD diff locally.
-5. Write `reviewer-prompt.txt`, its immutable manifest, `reviewer-browser-task.txt`, and `review-session.json` under the task/round directory.
-6. Remove stale response/results from older browser-review attempts and return `BROWSER_REVIEW_REQUIRED` with `prompt_path`, `browser_task_path`, and `response_path`.
+4. Save the full diff to `pr-diff.patch`.
+5. Build the lightweight, link-based `reviewer-prompt.txt` directing ChatGPT to inspect the GitHub PR/branch files for goals, correctness, security, and suggestions.
+6. Submit the prompt, collect the response, and parse the verdict.
 
 ### Browser Subagent ownership and multiline safety
 
@@ -189,22 +186,16 @@ Default `max_review_rounds` is 5. If round 5 still returns `REQUEST_CHANGES`, do
 
 When validating this workflow itself, do not modify either `gemini-and-chatgpt/` or `.agents/skills/gemini-and-chatgpt/`. They are test infrastructure, not the validation target. Put proof scripts, fixtures, generated application modules, coverage files, and evidence in the disposable project workspace or `.ai/`. If a validation scenario appears to require changing the tool, stop and report the gap instead of self-patching the installed/source Skill.
 
-If Browser Subagent cannot complete the ChatGPT interaction, leave code/PR state unchanged and stop `BLOCKED`. Do not launch a dedicated reviewer Chrome/profile, do not use clipboard fallback, and do not loop browser attempts. Report `.ai/gemini-chatgpt-actions.log`. If login/CAPTCHA/user confirmation is needed, ask the user to perform it.
+## Review transport and zero-attachment verification
+The review workflow executes `review_round.py --root .` to connect to an already-open Antigravity Chrome or fallback instance. No typed fallback is permitted on the happy path. The transport checks that there are zero attachments/pending uploads before submission, and must require exact text/hash equality and zero attachments/uploads before sending. Click the ChatGPT Send button through the DOM and Wait at most 300 seconds for completed response.
 
 If a script reports a HEAD mismatch, treat all prior approval as stale. Start a fresh review for the new HEAD.
 
 If CI changes from green to red after review, approval is insufficient; return to verification.
 
-
 ## Review-round idempotency and retry safety
 
 - If lifecycle is already `RELEASE_GATE` and the approved SHA still equals local/PR HEAD, `review_round.py` returns `ALREADY_APPROVED` and performs no browser review.
-- Re-running `prepare` for the same still-current round regenerates the deterministic package/session and clears stale response artifacts; it does not send anything to ChatGPT by itself.
-- Invoke one Browser Subagent task for the prepared round and require it to finish Send + response extraction before returning. If it cannot complete, stop `BLOCKED` rather than looping or switching transports.
+- Re-running `prepare` for the same still-current round regenerates the deterministic package/session and clears stale response artifacts.
 - `finalize` rechecks PR/local/verified HEAD and the immutable session before accepting a response, so a changed HEAD or stale response fails closed.
 - Never create scratch browser tests or edit the Skill copies to diagnose a normal task. Use `.ai/gemini-chatgpt-actions.log` as the diagnostic source.
-
-
-## 2026-08-21 — Browser Subagent end-to-end simplification
-
-The active reviewer path is prepare -> one Antigravity Browser Subagent review -> finalize. Browser Subagent owns open/reuse, prompt entry, marker verification, one Send click, response wait, and response extraction in one task. Main Agent only reads the immutable prompt before the browser call, saves the returned verbatim response, and runs finalize. The former OS-level CDP/PowerShell transport is disabled. Deterministic authority remains in Python for exact PR/local/verified SHA reconciliation, immutable package/session validation, verdict parsing, and lifecycle transition.

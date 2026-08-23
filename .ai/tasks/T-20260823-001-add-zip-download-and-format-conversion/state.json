@@ -1,0 +1,104 @@
+{
+  "blockers": [],
+  "checkpoint": {
+    "latest_at": "2026-08-23T11:17:46.480751+00:00",
+    "latest_path": ".ai/tasks/T-20260823-001-add-zip-download-and-format-conversion/checkpoints/20260823T111746480751+0000-PR_PREPARING.json"
+  },
+  "classification": {
+    "architect_required": false,
+    "complexity_tier": "SIMPLE",
+    "human_precheck_required": false,
+    "kind": "UNKNOWN",
+    "planner_required": false,
+    "risk_level": "LOW",
+    "score": 0,
+    "signals": []
+  },
+  "decisions": [],
+  "delivery": {
+    "base_branch": null,
+    "head_branch": null,
+    "head_sha": null,
+    "last_push_at": null,
+    "pr_number": null,
+    "pr_state": null,
+    "pr_url": null,
+    "repository": null
+  },
+  "identity": {
+    "created_at": "2026-08-23T11:14:10.061714+00:00",
+    "id": "T-20260823-001-add-zip-download-and-format-conversion",
+    "normalized_title": "Add ZIP download and format conversion",
+    "original_request": "Tich hop tinh nang Tai ve file ZIP (.zip) bang JSZip va Chuyen doi dinh dang anh khi tai (WebP/AVIF sang JPG/PNG)",
+    "updated_at": "2026-08-23T11:17:46.480751+00:00"
+  },
+  "implementation": {
+    "branch": null,
+    "candidate_sha": "58623d93e7cfb241aee7edc6dc011616dc9a2b31",
+    "changed_files": [],
+    "work_items_completed": [],
+    "work_items_remaining": []
+  },
+  "lifecycle": {
+    "current_state": "PR_PREPARING",
+    "local_repair_attempts": 0,
+    "previous_state": "VERIFYING",
+    "resume_state": null,
+    "state_entered_at": "2026-08-23T11:17:46.480751+00:00",
+    "transition_reason": "Central Verification Gate passed"
+  },
+  "plan": {
+    "completed_count": 0,
+    "current_work_item": null,
+    "current_work_items": [],
+    "plan_path": null,
+    "required": false,
+    "status": "NOT_REQUIRED",
+    "work_item_count": 0
+  },
+  "release": {
+    "approved_sha": null,
+    "human_reason": null,
+    "human_required": false,
+    "merge_policy": "human_only",
+    "status": "PENDING"
+  },
+  "requirements": {
+    "acceptance_criteria": [],
+    "assumptions": [],
+    "constraints": [],
+    "goal": "Tich hop tinh nang Tai ve file ZIP (.zip) bang JSZip va Chuyen doi dinh dang anh khi tai (WebP/AVIF sang JPG/PNG)",
+    "in_scope": [],
+    "out_of_scope": [],
+    "release_constraints": []
+  },
+  "review": {
+    "approval_valid": false,
+    "current_findings": [],
+    "current_target_sha": null,
+    "current_verdict": null,
+    "history_path": ".ai/tasks/T-20260823-001-add-zip-download-and-format-conversion/review-history.jsonl",
+    "max_rounds": 5,
+    "round": 0
+  },
+  "roles": {
+    "active": [
+      "ORCHESTRATOR"
+    ],
+    "completed": []
+  },
+  "schema_version": "2.0.0",
+  "verification": {
+    "candidate_sha": "58623d93e7cfb241aee7edc6dc011616dc9a2b31",
+    "completed_checks": [
+      "test_extension_structure"
+    ],
+    "evidence_ledger_path": ".ai/tasks/T-20260823-001-add-zip-download-and-format-conversion/verification.jsonl",
+    "failed_checks": [],
+    "overall_status": "PASS",
+    "required_checks": [
+      "test_extension_structure"
+    ],
+    "skipped_checks": []
+  }
+}

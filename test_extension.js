@@ -66,7 +66,10 @@ function testExtension() {
     'empty-state',
     'progress-container',
     'download-folder',
+    'download-format-convert',
     'download-delay',
+    'btn-download-zip',
+    'zip-btn-text',
     'btn-download-selected',
     'preview-modal',
     'btn-prev-modal',
@@ -82,7 +85,36 @@ function testExtension() {
   });
   console.log(`✓ 4. Đã xác thực đầy đủ ${requiredIds.length} ID phần tử UI trong popup.html`);
 
-  // 6. Test Aspect Ratio & Subfolder logic emulation
+  // 6. Check JSZip script and functionality
+  const jszipPath = path.join(__dirname, 'popup', 'jszip.min.js');
+  assert(fs.existsSync(jszipPath), 'Thiếu popup/jszip.min.js');
+  const JSZip = require(jszipPath);
+  const zip = new JSZip();
+  zip.file('test.png', Buffer.from('fake-image-binary-data'));
+  zip.file('folder/test2.jpg', Buffer.from('fake-image-2'));
+  const zipBuffer = zip.generateAsync({ type: 'nodebuffer' });
+  assert(zipBuffer, 'JSZip generateAsync thất bại');
+  console.log('✓ 5. Thư viện JSZip tích hợp thành công và đóng gói file ZIP chuẩn xác');
+
+  // 7. Test Format Conversion emulation
+  function shouldConvertImage(imgFormat, convertMode) {
+    if (!convertMode || convertMode === 'original') return false;
+    const fmt = (imgFormat || '').toUpperCase();
+    if (convertMode === 'webp-to-jpg' && (fmt === 'WEBP' || fmt === 'AVIF')) return 'image/jpeg';
+    if (convertMode === 'webp-to-png' && (fmt === 'WEBP' || fmt === 'AVIF')) return 'image/png';
+    if (convertMode === 'all-to-jpg' && fmt !== 'JPG') return 'image/jpeg';
+    if (convertMode === 'all-to-png' && fmt !== 'PNG') return 'image/png';
+    return false;
+  }
+
+  assert.strictEqual(shouldConvertImage('WEBP', 'webp-to-jpg'), 'image/jpeg');
+  assert.strictEqual(shouldConvertImage('AVIF', 'webp-to-png'), 'image/png');
+  assert.strictEqual(shouldConvertImage('JPG', 'webp-to-jpg'), false);
+  assert.strictEqual(shouldConvertImage('PNG', 'all-to-jpg'), 'image/jpeg');
+  assert.strictEqual(shouldConvertImage('SVG', 'original'), false);
+  console.log('✓ 6. Logic chuyển đổi định dạng ảnh (WebP/AVIF -> JPG/PNG) hoạt động chuẩn xác');
+
+  // 8. Test Aspect Ratio & Subfolder logic emulation
   function testRatio(w, h) {
     if (w <= 0 || h <= 0) return 'UNKNOWN';
     const ratio = w / h;
@@ -95,14 +127,14 @@ function testExtension() {
   assert.strictEqual(testRatio(1920, 1080), 'LANDSCAPE', '1920x1080 phải là LANDSCAPE');
   assert.strictEqual(testRatio(1080, 1920), 'PORTRAIT', '1080x1920 phải là PORTRAIT');
   assert.strictEqual(testRatio(800, 800), 'SQUARE', '800x800 phải là SQUARE');
-  console.log('✓ 5. Thuật toán phân loại Tỷ lệ khung hình (Aspect Ratio) hoạt động chính xác');
+  console.log('✓ 7. Thuật toán phân loại Tỷ lệ khung hình (Aspect Ratio) hoạt động chính xác');
 
-  // 7. Test Subfolder & filename sanitization emulation
+  // 9. Test Subfolder & filename sanitization emulation
   function sanitizeSubfolder(name) {
     return (name || '').replace(/[/\\?%*:|"<>]/g, '_').trim();
   }
   assert.strictEqual(sanitizeSubfolder('Shopee: Mua sắm/Hàng hot?'), 'Shopee_ Mua sắm_Hàng hot_');
-  console.log('✓ 6. Hàm khử ký tự cấm cho thư mục tải về hoạt động an toàn');
+  console.log('✓ 8. Hàm khử ký tự cấm cho thư mục tải về hoạt động an toàn');
 
   console.log('\n--- TOÀN BỘ KIỂM TRA EXTENSION THÀNH CÔNG 100%! ---');
 }

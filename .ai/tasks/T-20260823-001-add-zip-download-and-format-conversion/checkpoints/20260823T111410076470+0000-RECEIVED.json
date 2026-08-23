@@ -1,0 +1,35 @@
+{
+  "blockers": [],
+  "created_at": "2026-08-23T11:14:10.076470+00:00",
+  "delivery": {
+    "head_sha": null,
+    "pr_number": null,
+    "pr_url": null
+  },
+  "implementation": {
+    "branch": null,
+    "candidate_sha": null,
+    "changed_files": []
+  },
+  "lifecycle": {
+    "current_state": "RECEIVED",
+    "previous_state": null,
+    "resume_state": null
+  },
+  "reason": "MANUAL",
+  "resume_hint": "classify task",
+  "review": {
+    "approval_valid": false,
+    "current_target_sha": null,
+    "current_verdict": null,
+    "max_rounds": 5,
+    "round": 0
+  },
+  "schema_version": "2.0.0",
+  "task_id": "T-20260823-001-add-zip-download-and-format-conversion",
+  "verification": {
+    "candidate_sha": null,
+    "evidence_ledger_path": ".ai/tasks/T-20260823-001-add-zip-download-and-format-conversion/verification.jsonl",
+    "overall_status": "NOT_RUN"
+  }
+}

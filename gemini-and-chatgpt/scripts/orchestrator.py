@@ -604,6 +604,9 @@ def main() -> None:
                 import subprocess
                 candidate_sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=str(log_root), text=True).strip()
             checks = _load_checks(args.checks) if args.checks else []
+            if not checks:
+                from project_health_scanner import scan_health
+                checks = scan_health(args.root)
             result, evidence = verify_candidate(args.root, candidate_sha, checks, task_id=args.task_id, branch=args.branch, changed_files=args.changed_file, timeout_seconds=args.timeout)
             duration_ms = int((time.monotonic() - started) * 1000)
             append_action(log_root, stage="ORCHESTRATOR", status="PASS", action="verify", command=command_text, duration_ms=duration_ms, detail={"lifecycle_state": result.get("lifecycle", {}).get("current_state"), "evidence_count": len(evidence)})

@@ -5,7 +5,7 @@
 #
 # Contract (called by review_round.py):
 #   Params : -PromptPath -ReadbackPath -ResponsePath -ResultPath
-#            -ResponseTimeoutSec <int> [-ProfileDir <dir>] [-DebugPort <int>]
+#            -ResponseTimeoutSec <int> [-ProfileDir <dir>] [-DebugPort <int>] [-Endpoint <string>]
 #   Result : JSON at ResultPath with keys sent, response_received,
 #            transport_path, browser_source, browser_failovers,
 #            review_target_reused, composer_resets, insertion_attempts, error
@@ -14,9 +14,9 @@
 # Strategy: probe localhost:<DebugPort> for an already-debuggable Chromium
 # browser; otherwise launch one with a dedicated user-data-dir. Ensure a
 # chatgpt.com tab, inject the prompt into the ProseMirror composer via
-# Runtime.evaluate + execCommand (per-line, never bare Enter), verify markers
-# by readback, click Send exactly once, then poll until the assistant answer
-# stabilizes and persist it verbatim.
+# Runtime.evaluate + execCommand / Input.insertText, verify markers by readback,
+# click Send exactly once, then poll until the assistant answer stabilizes
+# and persist it verbatim.
 
 [CmdletBinding()]
 param(
@@ -33,7 +33,9 @@ param(
 
     [string]$ProfileDir,
 
-    [int]$DebugPort = 9222
+    [int]$DebugPort = 0,
+
+    [string]$Endpoint
 )
 
 Set-StrictMode -Version Latest
@@ -61,16 +63,18 @@ trap {
 # Result plumbing
 # ---------------------------------------------------------------------------
 
-$script:BrowserFailovers = New-Object System.Collections.Generic.List[string]
+$script:BrowserFailovers = 0
+$script:BrowserFailoverLogs = New-Object System.Collections.Generic.List[string]
 $script:ProfileLockPath = $null
 $script:OwnsProfileLock = $false
+$script:CurrentPort = $DebugPort
 
 function Write-Result {
     param([hashtable]$Fields, [int]$ExitCode)
     $payload = [ordered]@{
         transport_path       = 'DIRECT_FILL_CDP'
         browser_source       = $Fields.browser_source
-        browser_failovers    = $script:BrowserFailovers.ToArray()
+        browser_failovers    = $script:BrowserFailovers
         review_target_reused = $Fields.review_target_reused
         composer_resets      = $Fields.composer_resets
         insertion_attempts   = $Fields.insertion_attempts
@@ -124,36 +128,41 @@ function ConvertTo-JsString {
     return $sb.ToString()
 }
 
-function Get-ChromiumCandidatePaths {
-    $list = New-Object System.Collections.Generic.List[string]
+function Find-ChromeExecutable {
+    $candidates = New-Object System.Collections.Generic.List[string]
     foreach ($name in @('chrome.exe', 'msedge.exe')) {
         try {
             $cmd = Get-Command $name -ErrorAction SilentlyContinue
-            if ($cmd -and $cmd.Source) { $list.Add($cmd.Source) }
+            if ($cmd -and $cmd.Source) { $candidates.Add($cmd.Source) }
         } catch { }
     }
     foreach ($exe in @('chrome.exe', 'msedge.exe')) {
         $reg = Get-ItemProperty -Path ("HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\" + $exe) -ErrorAction SilentlyContinue
-        if ($reg -and $reg.'(default)') { $list.Add($reg.'(default)') }
+        if ($reg -and $reg.'(default)') { $candidates.Add($reg.'(default)') }
     }
     foreach ($root in @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:LOCALAPPDATA)) {
         if (-not $root) { continue }
-        $list.Add((Join-Path $root "Google\Chrome\Application\chrome.exe"))
-        $list.Add((Join-Path $root "Microsoft\Edge\Application\msedge.exe"))
+        $candidates.Add((Join-Path $root "Google\Chrome\Application\chrome.exe"))
+        $candidates.Add((Join-Path $root "Microsoft\Edge\Application\msedge.exe"))
     }
-    return @($list | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique)
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate)) {
+            return [string]$candidate
+        }
+    }
+    return $null
 }
 
-function Test-DebugEndpoint {
+function Test-CdpList {
+    param([int]$Port)
     try {
-        $v = Invoke-RestMethod -Uri ("http://127.0.0.1:{0}/json/version" -f $DebugPort) -TimeoutSec 2
-        return ($null -ne $v -and $null -ne $v.Browser)
+        $targets = Invoke-RestMethod -Uri ("http://127.0.0.1:{0}/json/list" -f $Port) -TimeoutSec 3
+        return ($null -ne $targets)
     } catch { return $false }
 }
 
 # ---------------------------------------------------------------------------
-# Resolve profile dir (default: <repo>/.ai/chrome-reviewer-profile derived
-# from ResultPath ancestors, falling back to TEMP).
+# Resolve profile dir & lock
 # ---------------------------------------------------------------------------
 
 if (-not $ProfileDir) {
@@ -167,398 +176,531 @@ if (-not $ProfileDir) {
             $cursor = $parent
         }
     }
-    if ($anchor) { $ProfileDir = Join-Path $anchor 'chrome-reviewer-profile' }
-    else { $ProfileDir = Join-Path $env:TEMP 'chatgpt-reviewer-profile' }
+    if ($anchor) {
+        $ProfileDir = Join-Path $anchor 'chrome-reviewer-profile'
+    } else {
+        $ProfileDir = Join-Path ([System.IO.Path]::GetTempPath()) 'chatgpt-reviewer-profile'
+    }
+}
+if (-not (Test-Path -LiteralPath $ProfileDir)) {
+    New-Item -ItemType Directory -Path $ProfileDir -Force | Out-Null
 }
 
-# ---------------------------------------------------------------------------
-# Single-flight profile lock: two Chromium processes cannot share one
-# user-data-dir. A second launch silently joins the FIRST process WITHOUT the
-# debug port -> the transport then talks to the wrong browser or hits the
-# login wall. If the lock is held, fail fast with PROFILE_BUSY instead of
-# degrading to a fresh (never logged-in) profile.
-# ---------------------------------------------------------------------------
-
-$script:ProfileLockPath = Join-Path $env:TEMP ('chatgpt-reviewer-profile.lock.port' + $DebugPort)
+$script:ProfileLockPath = Join-Path $ProfileDir 'reviewer.lock'
 $lockOwner = $null
-try {
-    if (Test-Path -LiteralPath $script:ProfileLockPath) {
-        $lockOwner = ([System.IO.File]::ReadAllText($script:ProfileLockPath)).Trim()
-    }
-} catch { $lockOwner = $null }
+if (Test-Path -LiteralPath $script:ProfileLockPath) {
+    try { $lockOwner = [System.IO.File]::ReadAllText($script:ProfileLockPath).Trim() } catch { $lockOwner = $null }
+}
 
 if (-not [string]::IsNullOrWhiteSpace($lockOwner)) {
-    Write-Output ('PROFILE_BUSY: reviewer profile lock held by ' + $lockOwner)
-    Write-Result -Fields @{
-        browser_source = $null; review_target_reused = $false; composer_resets = 0
-        insertion_attempts = 0; sent = $false; response_received = $false
-        error = ('PROFILE_BUSY: another review transport holds the reviewer profile lock (' + $lockOwner + '); no fallback to an unlogged-in profile')
-        extra = @{ profile_dir = $ProfileDir; profile_lock = $script:ProfileLockPath }
-    } -ExitCode 1
+    $isAlive = $false
+    if ($lockOwner -match 'pid=(\d+)') {
+        $pidNum = [int]$matches[1]
+        try {
+            $p = Get-Process -Id $pidNum -ErrorAction SilentlyContinue
+            if ($p) { $isAlive = $true }
+        } catch { }
+    }
+    if ($isAlive) {
+        Write-Output ('PROFILE_BUSY: reviewer profile lock held by ' + $lockOwner)
+        Write-Result -Fields @{
+            browser_source = $null; review_target_reused = $false; composer_resets = 0
+            insertion_attempts = 0; sent = $false; response_received = $false
+            error = ('PROFILE_BUSY: another review transport holds the reviewer profile lock (' + $lockOwner + '); no fallback to an unlogged-in profile')
+            extra = @{ profile_dir = $ProfileDir; profile_lock = $script:ProfileLockPath }
+        } -ExitCode 1
+    } else {
+        try { Remove-Item -LiteralPath $script:ProfileLockPath -Force -ErrorAction SilentlyContinue } catch { }
+    }
 }
 [System.IO.File]::WriteAllText($script:ProfileLockPath, ('pid=' + $PID + ' at ' + [DateTime]::UtcNow.ToString('o')), [System.Text.UTF8Encoding]::new($false))
 $script:OwnsProfileLock = $true
 
 # ---------------------------------------------------------------------------
-# Browser acquisition
+# Browser acquisition (ANTIGRAVITY_EXISTING_CDP vs DEDICATED_REVIEWER_CDP_FALLBACK)
 # ---------------------------------------------------------------------------
 
-$browserSource = $null
-$launchedProc  = $null
-
-if (Test-DebugEndpoint) {
-    $browserSource = 'existing-debug-port'
-    $script:BrowserFailovers.Add('reuse-existing-debug-port') | Out-Null
-} else {
-    $candidates = @(Get-ChromiumCandidatePaths)
-    foreach ($exe in $candidates) {
-        $label = 'launch:' + (Split-Path -Leaf $exe)
-        $procArgs = @(
-            "--remote-debugging-port=$DebugPort",
-            "--user-data-dir=$ProfileDir",
-            '--no-first-run',
-            '--no-default-browser-check',
-            '--disable-session-crashed-bubble',
-            '--disable-infobars',
-            '--window-size=1400,950',
-            'https://chatgpt.com/'
-        )
-        try {
-            $launchedProc = Start-Process -FilePath $exe -ArgumentList $procArgs -PassThru -WindowStyle Normal
-        } catch {
-            $script:BrowserFailovers.Add($label + ':spawn-failed') | Out-Null
-            continue
-        }
-        $ready = $false
-        for ($i = 0; $i -lt 30; $i++) {
-            Start-Sleep -Milliseconds 1000
-            try { if ($launchedProc.HasExited) { break } } catch { }
-            if (Test-DebugEndpoint) { $ready = $true; break }
-        }
-        if ($ready) {
-            $browserSource = 'launched'
-            $script:BrowserFailovers.Add($label) | Out-Null
-            break
-        }
-        $script:BrowserFailovers.Add($label + ':port-not-open') | Out-Null
-        try { if (-not $launchedProc.HasExited) { Stop-Process -Id $launchedProc.Id -Force -ErrorAction SilentlyContinue } } catch { }
+function Find-ExistingDebugBrowser {
+    param([int]$Port)
+    if ($Port -le 0) { return $null }
+    if (Test-CdpList -Port $Port) {
+        return @{ source = 'ANTIGRAVITY_EXISTING_CDP'; port = $Port }
     }
-    if (-not $browserSource) {
+    return $null
+}
+
+function Ensure-DedicatedReviewerBrowser {
+    param([int]$Port)
+    if ($Port -le 0) { $Port = 9334 }
+    $exe = Find-ChromeExecutable
+    if (-not $exe) {
         Write-Result -Fields @{
             browser_source = $null; review_target_reused = $false; composer_resets = 0
             insertion_attempts = 0; sent = $false; response_received = $false
-            error = 'NO_DEBUGGABLE_BROWSER: could not start any Chromium with remote debugging'
+            error = 'NO_CHROME_EXECUTABLE: could not locate Google Chrome or Microsoft Edge on system'
         } -ExitCode 1
     }
-}
 
-# ---------------------------------------------------------------------------
-# Target (tab) management
-# ---------------------------------------------------------------------------
+    $procArgs = @(
+        "--remote-debugging-port=$Port",
+        "--user-data-dir=$ProfileDir",
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-session-crashed-bubble',
+        '--disable-infobars',
+        '--window-size=1400,950',
+        'https://chatgpt.com/'
+    )
 
-function Get-ChatGptTargets {
-    $targets = Invoke-RestMethod -Uri ("http://127.0.0.1:{0}/json/list" -f $DebugPort) -TimeoutSec 5
-    return @($targets | Where-Object { $_.type -eq 'page' -and $_.url -match '^https://(www\.)?chatgpt\.com/' })
-}
-
-$tab = $null
-$reviewTargetReused = $false
-for ($i = 0; $i -lt 20; $i++) {
-    $found = @(Get-ChatGptTargets)
-    if ($found.Count -gt 0) { $tab = $found[0]; $reviewTargetReused = $true; break }
-    Start-Sleep -Milliseconds 1000
-}
-
-if (-not $tab) {
-    $enc = [uri]::EscapeDataString('https://chatgpt.com/')
+    $launchedProc = $null
     try {
-        $null = Invoke-RestMethod -Method Put -Uri ("http://127.0.0.1:{0}/json/new?url={1}" -f $DebugPort, $enc) -TimeoutSec 10
+        $launchedProc = Start-Process -FilePath $exe -ArgumentList $procArgs -PassThru -WindowStyle Normal
     } catch {
-        try { $null = Invoke-RestMethod -Uri ("http://127.0.0.1:{0}/json/new?url={1}" -f $DebugPort, $enc) -TimeoutSec 10 } catch { }
+        Write-Result -Fields @{
+            browser_source = $null; review_target_reused = $false; composer_resets = 0
+            insertion_attempts = 0; sent = $false; response_received = $false
+            error = ('CHROME_SPAWN_FAILED: ' + $_.Exception.Message)
+        } -ExitCode 1
     }
-    for ($i = 0; $i -lt 25; $i++) {
-        $found = @(Get-ChatGptTargets)
-        if ($found.Count -gt 0) { $tab = $found[0]; break }
+
+    $ready = $false
+    for ($i = 0; $i -lt 30; $i++) {
         Start-Sleep -Milliseconds 1000
+        try { if ($launchedProc.HasExited) { break } } catch { }
+        if (Test-CdpList -Port $Port) { $ready = $true; break }
+    }
+
+    if (-not $ready) {
+        try { if (-not $launchedProc.HasExited) { Stop-Process -Id $launchedProc.Id -Force -ErrorAction SilentlyContinue } } catch { }
+        Write-Result -Fields @{
+            browser_source = $null; review_target_reused = $false; composer_resets = 0
+            insertion_attempts = 0; sent = $false; response_received = $false
+            error = ('NO_DEBUGGABLE_BROWSER: Chrome started but remote debugging port ${Port}: did not respond')
+        } -ExitCode 1
+    }
+
+    return @{ source = 'DEDICATED_REVIEWER_CDP_FALLBACK'; port = $Port }
+}
+
+function Ensure-ReviewerBrowser {
+    param([int]$Port)
+    $existing = Find-ExistingDebugBrowser -Port $Port
+    if ($existing) { return $existing }
+    return Ensure-DedicatedReviewerBrowser -Port $Port
+}
+
+function Receive-CdpMessage {
+    param([System.Net.WebSockets.ClientWebSocket]$Socket, [int]$TimeoutMs = 15000)
+    if ($null -eq $Socket -or $Socket.State -ne [System.Net.WebSockets.WebSocketState]::Open) { return $null }
+    $buffer = [System.ArraySegment[byte]]::new([byte[]]::new(65536))
+    $ms = [System.IO.MemoryStream]::new()
+    while ($true) {
+        $task = $Socket.ReceiveAsync($buffer, [System.Threading.CancellationToken]::None)
+        if (-not $task.Wait($TimeoutMs)) {
+            return $null
+        }
+        $recv = $task.GetAwaiter().GetResult()
+        if ($recv.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) {
+            return $null
+        }
+        $ms.Write($buffer.Array, $buffer.Offset, $recv.Count)
+        if ($recv.EndOfMessage) { break }
+    }
+    $raw = [System.Text.Encoding]::UTF8.GetString($ms.ToArray())
+    try {
+        return ($raw | ConvertFrom-Json)
+    } catch {
+        return $null
     }
 }
 
-if (-not $tab -or -not $tab.webSocketDebuggerUrl) {
+$browserInfo = Ensure-ReviewerBrowser -Port $script:CurrentPort
+$browserSource = $browserInfo.source
+$script:CurrentPort = [int]$browserInfo.port
+
+# ---------------------------------------------------------------------------
+# Persistent reviewer target management
+# ---------------------------------------------------------------------------
+
+$ReviewerTargetStatePath = Join-Path $ProfileDir 'reviewer-target.json'
+
+function Get-ReviewerTarget {
+    param([int]$Port)
+    if (Test-Path -LiteralPath $ReviewerTargetStatePath) {
+        try {
+            $saved = [System.IO.File]::ReadAllText($ReviewerTargetStatePath) | ConvertFrom-Json
+            if ($saved -and [int]$saved.port -eq $Port -and $saved.id) {
+                $list = Invoke-RestMethod -Uri ("http://127.0.0.1:{0}/json/list" -f $Port) -TimeoutSec 5
+                foreach ($t in $list) {
+                    if ($t.id -eq $saved.id) { return @{ tab = $t; reused = $true } }
+                }
+            }
+        } catch { }
+    }
+
+    $list = @()
+    try {
+        $list = Invoke-RestMethod -Uri ("http://127.0.0.1:{0}/json/list" -f $Port) -TimeoutSec 5
+    } catch { }
+
+    foreach ($t in $list) {
+        if ($t.type -eq 'page' -and $t.url -match '^https://(www\.)?chatgpt\.com/') {
+            return @{ tab = $t; reused = $true }
+        }
+    }
+
+    foreach ($t in $list) {
+        if ($t.type -eq 'page' -and ($t.url -eq 'about:blank' -or $t.url -match '^chrome://newtab')) {
+            return @{ tab = $t; reused = $false }
+        }
+    }
+
+    # New target creation remains only a one-time fallback when no reusable ChatGPT target exists.
+    $newTab = Invoke-RestMethod -Uri ("http://127.0.0.1:{0}/json/new?https://chatgpt.com/" -f $Port) -Method Put -TimeoutSec 8
+    return @{ tab = $newTab; reused = $false }
+}
+
+function Save-ReviewerTarget {
+    param($Tab, [int]$Port, [string]$Source)
+    $obj = @{ id = $Tab.id; port = $Port; source = $Source; updated_at = [DateTime]::UtcNow.ToString('o') }
+    [System.IO.File]::WriteAllText($ReviewerTargetStatePath, ($obj | ConvertTo-Json -Compress), [System.Text.UTF8Encoding]::new($false))
+}
+
+function Resolve-ReviewerBrowserTarget {
+    param([int]$Port, [string]$Source)
+    $res = Get-ReviewerTarget -Port $Port
+    $tab = $res.tab
+    Save-ReviewerTarget $tab $Port $Source
+    return $res
+}
+
+$targetResolution = Resolve-ReviewerBrowserTarget -Port $script:CurrentPort -Source $browserSource
+$tab = $targetResolution.tab
+$reviewTargetReused = [bool]$targetResolution.reused
+
+# ---------------------------------------------------------------------------
+# WebSocket CDP client
+# ---------------------------------------------------------------------------
+
+$wsUrl = $tab.webSocketDebuggerUrl
+if (-not $wsUrl) {
+    $wsUrl = ("ws://127.0.0.1:{0}/devtools/page/{1}" -f $script:CurrentPort, $tab.id)
+}
+
+$ws = [System.Net.WebSockets.ClientWebSocket]::new()
+$cts = [System.Threading.CancellationTokenSource]::new(15000)
+try {
+    [void]$ws.ConnectAsync([Uri]$wsUrl, $cts.Token).GetAwaiter().GetResult()
+} catch {
+    $script:BrowserFailovers++
+    $script:BrowserFailoverLogs.Add('cdp-ws-connect-failed') | Out-Null
     Write-Result -Fields @{
         browser_source = $browserSource; review_target_reused = $reviewTargetReused; composer_resets = 0
         insertion_attempts = 0; sent = $false; response_received = $false
-        error = 'CHATGPT_TAB_UNAVAILABLE: no debuggable chatgpt.com page could be opened'
+        error = ('CDP_CONNECT_FAILED: could not open WebSocket to ' + $wsUrl + ' :: ' + $_.Exception.Message)
     } -ExitCode 1
 }
 
-# ---------------------------------------------------------------------------
-# CDP websocket client
-# ---------------------------------------------------------------------------
+$script:CdpMsgId = 100
 
-$script:CdpId = 0
-$script:CdpWs = $null
+function Invoke-CdpCommand {
+    param(
+        [string]$Method,
+        [hashtable]$Params = @{},
+        [int]$TimeoutMs = 25000
+    )
+    if ($ws.State -ne [System.Net.WebSockets.WebSocketState]::Open) {
+        throw ("Cannot invoke CDP command {0}: WebSocket state is {1}" -f $Method, $ws.State)
+    }
+    $script:CdpMsgId++
+    $id = $script:CdpMsgId
+    $req = @{ id = $id; method = $Method; params = $Params }
+    $json = $req | ConvertTo-Json -Depth 10 -Compress
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+    $seg = [System.ArraySegment[byte]]::new($bytes)
+    [void]$ws.SendAsync($seg, [System.Net.WebSockets.WebSocketMessageType]::Text, $true, [System.Threading.CancellationToken]::None).GetAwaiter().GetResult()
 
-function Connect-CdpTab {
-    param([string]$Url)
-    $ws = [System.Net.WebSockets.ClientWebSocket]::new()
-    $null = $ws.ConnectAsync([Uri]$Url, [System.Threading.CancellationToken]::None).GetAwaiter().GetResult()
-    $script:CdpWs = $ws
-}
-
-function Send-CdpCommand {
-    param([string]$Method, [hashtable]$Params, [int]$TimeoutMs = 60000)
-    $script:CdpId++
-    $frame = @{ id = $script:CdpId; method = $Method; params = $Params } | ConvertTo-Json -Depth 6 -Compress
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($frame)
-    $ws = $script:CdpWs
-    $sendCts = [System.Threading.CancellationTokenSource]::new(20000)
-    [void]$ws.SendAsync([ArraySegment[byte]]::new($bytes), [System.Net.WebSockets.WebSocketMessageType]::Text, $true, $sendCts.Token).GetAwaiter().GetResult()
-
-    $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    $buffer = New-Object byte[] 2097152
-    $logPath = Join-Path $env:TEMP 'cdp_transport_debug.log'
-    [System.IO.File]::AppendAllText($logPath, ("SENT id={0} method={1}`n" -f $script:CdpId, $Method))
-    while ($sw.ElapsedMilliseconds -lt $TimeoutMs) {
-        $ms = [System.IO.MemoryStream]::new()
-        $endOfMessage = $false
-        while (-not $endOfMessage) {
-            if ($sw.ElapsedMilliseconds -ge $TimeoutMs) { throw "CDP receive timeout for $Method" }
-            $seg = [ArraySegment[byte]]::new($buffer)
-            $recvCts = [System.Threading.CancellationTokenSource]::new(30000)
-            $res = $ws.ReceiveAsync($seg, $recvCts.Token).GetAwaiter().GetResult()
-            if ($res.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) {
-                throw "CDP websocket closed during $Method"
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMs)
+    while ([DateTime]::UtcNow -lt $deadline -and $ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
+        $msg = Receive-CdpMessage -Socket $ws -TimeoutMs 5000
+        if ($null -ne $msg) {
+            if ($null -ne $msg.PSObject.Properties['id'] -and $msg.id -eq $id) {
+                if ($null -ne $msg.PSObject.Properties['error'] -and $null -ne $msg.error) {
+                    throw ("CDP Error on {0}: {1}" -f $Method, ($msg.error | ConvertTo-Json -Compress))
+                }
+                if ($null -ne $msg.PSObject.Properties['result']) {
+                    return $msg.result
+                }
+                return $null
             }
-            $ms.Write($buffer, 0, $res.Count)
-            $endOfMessage = $res.EndOfMessage
-        }
-        $text = [System.Text.Encoding]::UTF8.GetString($ms.ToArray())
-        $snippet = $text
-        if ($snippet.Length -gt 400) { $snippet = $snippet.Substring(0, 400) + '...' }
-        [System.IO.File]::AppendAllText($logPath, ("RECV {0}`n" -f $snippet))
-        $msg = $null
-        try { $msg = $text | ConvertFrom-Json } catch { continue }
-        if ($msg.psobject.Properties['id'] -and $msg.id -eq $script:CdpId) {
-            [System.IO.File]::AppendAllText($logPath, ("MATCHED id={0} props=[{1}]`n---`n" -f $msg.id, (($msg.psobject.Properties.Name) -join ',')))
-            return $msg
         }
     }
-    throw "CDP response timeout for $Method"
+    throw ("Timeout waiting for CDP response to {0} id={1}" -f $Method, $id)
 }
 
 function Invoke-PageJs {
-    param([string]$Js, [int]$TimeoutMs = 60000, [switch]$RetryOnDisconnect)
-    for ($attempt = 0; $attempt -lt 2; $attempt++) {
-        try {
-            if (-not $script:CdpWs -or $script:CdpWs.State -ne [System.Net.WebSockets.WebSocketState]::Open) {
-                Connect-CdpTab -Url $script:TabUrl
-            }
-            $resp = Send-CdpCommand -Method 'Runtime.evaluate' -Params @{
-                expression    = $Js
-                returnByValue = $true
-                awaitPromise  = $false
-            } -TimeoutMs $TimeoutMs
-            if ($resp.psobject.Properties['error'] -and $resp.error) {
-                throw ("CDP protocol error: " + $resp.error.message)
-            }
-            $inner = $resp.result
-            $hasException = ($null -ne $inner -and $null -ne $inner.psobject.Properties['exceptionDetails'] -and $null -ne $inner.exceptionDetails)
-            if ($hasException) {
-                $detail = ''
-                $excProp = $inner.exceptionDetails
-                if ($null -ne $excProp -and $null -ne $excProp.psobject.Properties['exception'] -and $null -ne $excProp.exception -and $null -ne $excProp.exception.psobject.Properties['description']) {
-                    $detail = [string]$excProp.exception.description
-                }
-                throw ("Page JS exception: " + $detail)
-            }
-            $remoteObj = $null
-            if ($null -ne $inner -and $null -ne $inner.psobject.Properties['result']) { $remoteObj = $inner.result }
-            $valueOut = $null
-            if ($null -ne $remoteObj -and $null -ne $remoteObj.psobject.Properties['value']) { $valueOut = $remoteObj.value }
-            return $valueOut
-        } catch {
-            try { if ($script:CdpWs) { $script:CdpWs.Dispose() } } catch { }
-            $script:CdpWs = $null
-            if (-not $RetryOnDisconnect -or $attempt -eq 1) { throw }
-            # Tab may have been closed/navigated: re-resolve then reconnect.
-            $found = @(Get-ChatGptTargets)
-            if ($found.Count -eq 0) { throw 'chatgpt.com tab disappeared during CDP session' }
-            $script:TabUrl = $found[0].webSocketDebuggerUrl
-            $script:BrowserFailovers.Add('reconnect-tab') | Out-Null
-        }
+    param([string]$Js, [int]$TimeoutMs = 25000)
+    $eval = Invoke-CdpCommand -Method 'Runtime.evaluate' -Params @{
+        expression    = $Js
+        returnByValue = $true
+        awaitPromise  = $true
+    } -TimeoutMs $TimeoutMs
+    if ($null -ne $eval -and $null -ne $eval.PSObject.Properties['result'] -and $null -ne $eval.result.PSObject.Properties['value']) {
+        return $eval.result.value
     }
+    return $null
 }
-
-$script:TabUrl = $tab.webSocketDebuggerUrl
-Connect-CdpTab -Url $script:TabUrl
 
 # ---------------------------------------------------------------------------
-# Phase 1: wait for usable composer OR detect the login wall
+# Direct Navigation to https://chatgpt.com/ (Fresh Session)
 # ---------------------------------------------------------------------------
 
-$statusJs = "(function(){var ed=document.querySelector('#prompt-textarea');var loginBtn=document.querySelector('button[data-testid=""login-button""]')||document.querySelector('a[href*=""/auth/login""]');var bodyTxt=document.body?document.body.innerText||'':'';if(ed)return JSON.stringify({state:'COMPOSER'});if(loginBtn)return JSON.stringify({state:'LOGIN_WALL'});if(/Log in|Sign up/.test(bodyTxt))return JSON.stringify({state:'LOGIN_WALL'});return JSON.stringify({state:'LOADING'});})()"
-
-$pageState = 'LOADING'
-$script:LastEvalError = $null
-$waitDeadline = [DateTime]::UtcNow.AddSeconds(45)
-while ([DateTime]::UtcNow -lt $waitDeadline) {
-    $raw = $null
-    try { $raw = Invoke-PageJs -Js $statusJs -TimeoutMs 20000 -RetryOnDisconnect } catch { $script:LastEvalError = $_.Exception.Message }
-    if ($raw) {
-        $parsed = $raw | ConvertFrom-Json
-        $pageState = $parsed.state
-        if ($pageState -in @('COMPOSER', 'LOGIN_WALL')) { break }
-    }
-    Start-Sleep -Milliseconds 1200
-}
-
-if ($pageState -eq 'LOGIN_WALL') {
-    Write-Output 'LOGIN_REQUIRED: please sign in to ChatGPT in the reviewer browser window now. Waiting up to 300 seconds...'
-    $loginDeadline = [DateTime]::UtcNow.AddSeconds(300)
-    while ([DateTime]::UtcNow -lt $loginDeadline) {
-        Start-Sleep -Seconds 4
-        $raw = $null
-        try { $raw = Invoke-PageJs -Js $statusJs -TimeoutMs 20000 -RetryOnDisconnect } catch { $script:LastEvalError = $_.Exception.Message }
-        if ($raw) {
-            $parsed = $raw | ConvertFrom-Json
-            $pageState = $parsed.state
-            if ($pageState -eq 'COMPOSER') { break }
-            Write-Output ('login-wait: current state=' + $pageState)
-        }
-    }
-    if ($pageState -ne 'COMPOSER') {
-        Write-Result -Fields @{
-            browser_source = $browserSource; review_target_reused = $reviewTargetReused; composer_resets = 0
-            insertion_attempts = 0; sent = $false; response_received = $false
-            error = 'LOGIN_REQUIRED: sign-in was not completed within the 300s wait window'
-        } -ExitCode 4
-    }
-}
-if ($pageState -ne 'COMPOSER') {
-    $composerError = 'COMPOSER_NOT_FOUND: chatgpt.com loaded without a usable #prompt-textarea composer'
-    if ($script:LastEvalError) { $composerError = $composerError + ' | last_eval_error: ' + $script:LastEvalError }
+try {
+    Invoke-CdpCommand -Method 'Page.enable' -Params @{} | Out-Null
+    Invoke-CdpCommand -Method 'Runtime.enable' -Params @{} | Out-Null
+    Invoke-CdpCommand -Method 'Page.navigate' -Params @{ url = 'https://chatgpt.com/' } | Out-Null
+} catch {
     Write-Result -Fields @{
         browser_source = $browserSource; review_target_reused = $reviewTargetReused; composer_resets = 0
         insertion_attempts = 0; sent = $false; response_received = $false
-        error = $composerError
+        error = ('CHATGPT_NAVIGATION_FAILED: could not navigate reviewer target to https://chatgpt.com/ :: ' + $_.Exception.Message)
     } -ExitCode 1
 }
 
 # ---------------------------------------------------------------------------
-# Phase 2: reset composer
+# DOM & Login State Verification (Accurate Login Detection)
 # ---------------------------------------------------------------------------
 
-$clearJs = "(function(){var ed=document.querySelector('#prompt-textarea');if(!ed)return 'NO_EDITOR';ed.focus();document.execCommand('selectAll',false,null);document.execCommand('delete',false,null);return (ed.innerText||'').trim()===''?'CLEARED':'DIRTY';})()"
+$checkDomStateJs = @"
+(function() {
+    var ed = document.querySelector('#prompt-textarea');
+    if (ed && !ed.disabled && ed.offsetParent !== null) {
+        return 'COMPOSER_READY';
+    }
+    var loginElements = document.querySelectorAll('button[data-testid="login-button"], button[data-testid="welcome-login-button"], a[href*="/login"], a[href*="/auth/login"], button[aria-label="Log in"]');
+    if (loginElements.length > 0) {
+        return 'LOGIN_REQUIRED';
+    }
+    var allButtons = document.querySelectorAll('button, a');
+    for (var i = 0; i < allButtons.length; i++) {
+        var t = (allButtons[i].innerText || '').trim().toLowerCase();
+        if (t === 'log in' || t === 'sign up' || t === 'đăng nhập' || t === 'đăng ký') {
+            return 'LOGIN_REQUIRED';
+        }
+    }
+    if (ed && !ed.disabled) {
+        return 'COMPOSER_READY';
+    }
+    return 'LOADING';
+})()
+"@
+
+$domState = 'LOADING'
+for ($i = 0; $i -lt 30; $i++) {
+    Start-Sleep -Milliseconds 1000
+    try {
+        $state = [string](Invoke-PageJs -Js $checkDomStateJs -TimeoutMs 5000)
+        if ($state -eq 'LOGIN_REQUIRED' -or $state -eq 'COMPOSER_READY') {
+            $domState = $state
+            break
+        }
+    } catch { }
+}
+
+if ($domState -eq 'LOGIN_REQUIRED') {
+    Write-Result -Fields @{
+        browser_source = $browserSource; review_target_reused = $reviewTargetReused; composer_resets = 0
+        insertion_attempts = 0; sent = $false; response_received = $false
+        error = 'REVIEWER_LOGIN_REQUIRED: ChatGPT login wall detected. Please log in once in the reviewer browser window and rerun review.'
+    } -ExitCode 4
+}
+
+if ($domState -ne 'COMPOSER_READY') {
+    Write-Result -Fields @{
+        browser_source = $browserSource; review_target_reused = $reviewTargetReused; composer_resets = 0
+        insertion_attempts = 0; sent = $false; response_received = $false
+        error = 'COMPOSER_NOT_READY: #prompt-textarea composer did not become ready within timeout'
+    } -ExitCode 1
+}
+
+# ---------------------------------------------------------------------------
+# Reset Composer DOM in place
+# ---------------------------------------------------------------------------
+
+function Reset-ComposerDom {
+    $clearJs = @"
+    (function() {
+        var ed = document.querySelector('#prompt-textarea');
+        if (!ed) return 'NO_EDITOR';
+        ed.focus();
+        if (ed.tagName.toLowerCase() === 'textarea') {
+            ed.value = '';
+            ed.dispatchEvent(new Event('input', { bubbles: true }));
+        } else {
+            ed.innerHTML = '<p><br></p>';
+            ed.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        return (ed.innerText || '').trim() === '' ? 'CLEARED' : 'DIRTY';
+    })()
+"@
+    return [string](Invoke-PageJs -Js $clearJs -TimeoutMs 10000)
+}
 
 $composerResets = 0
-for ($try = 0; $try -lt 3; $try++) {
-    $res = Invoke-PageJs -Js $clearJs -TimeoutMs 20000 -RetryOnDisconnect
-    if ($res -eq 'CLEARED') { $composerResets++; break }
-    if ($res -eq 'DIRTY') { $composerResets++; continue }
-    Write-Result -Fields @{
-        browser_source = $browserSource; review_target_reused = $reviewTargetReused; composer_resets = $composerResets
-        insertion_attempts = 0; sent = $false; response_received = $false
-        error = 'COMPOSER_RESET_FAILED: editor disappeared while clearing'
-    } -ExitCode 1
-}
-
-# ---------------------------------------------------------------------------
-# Phase 3: inject the prompt line-by-line (never a bare Enter keypress)
-# ---------------------------------------------------------------------------
-
-$promptText = [System.IO.File]::ReadAllText($PromptPath)
-$promptText = $promptText -replace "`r`n", "`n"
-$lines = $promptText -split "`n", -1
-$lastIndex = $lines.Count - 1
-$insertionAttempts = 0
-$beginMarker = '=== GEMINI_CHATGPT_REVIEW_BEGIN ==='
-$endMarker = '=== GEMINI_CHATGPT_REVIEW_END ==='
-
-for ($i = 0; $i -lt $lines.Count; $i++) {
-    $line = $lines[$i]
-    $parts = New-Object System.Collections.Generic.List[string]
-    $parts.Add("(function(){var ed=document.querySelector('#prompt-textarea');if(!ed)return 'NO_EDITOR';ed.focus();") | Out-Null
-    if ($line.Length -gt 0) {
-        $parts.Add("document.execCommand('insertText',false," + (ConvertTo-JsString $line) + ");") | Out-Null
-    }
-    if ($i -lt $lastIndex) {
-        $parts.Add("document.execCommand('insertLineBreak',false,null);") | Out-Null
-    }
-    $parts.Add("return 'OK';})()") | Out-Null
-    $res = Invoke-PageJs -Js ($parts -join '') -TimeoutMs 30000 -RetryOnDisconnect
-    if ($res -ne 'OK') {
+$resetStatus = Reset-ComposerDom
+if ($resetStatus -eq 'DIRTY') {
+    $composerResets++
+    $resetStatus = Reset-ComposerDom
+    if ($resetStatus -eq 'DIRTY') {
         Write-Result -Fields @{
             browser_source = $browserSource; review_target_reused = $reviewTargetReused; composer_resets = $composerResets
-            insertion_attempts = $insertionAttempts; sent = $false; response_received = $false
-            error = ('INSERT_ABORTED: editor disappeared at line ' + ($i + 1))
+            insertion_attempts = 0; sent = $false; response_received = $false
+            error = 'COMPOSER_RESET_FAILED: could not clear stale composer state without keyboard automation after one in-place retry'
         } -ExitCode 1
-    }
-    $insertionAttempts++
-    if (($i % 60) -eq 0) {
-        Write-Verbose ("injecting reviewer prompt: line {0}/{1}" -f ($i + 1), $lines.Count)
     }
 }
 
 # ---------------------------------------------------------------------------
-# Phase 4: readback + marker verification BEFORE any send
+# Inject Prompt via Input.insertText / DOM Injection (Zero Clipboard)
 # ---------------------------------------------------------------------------
 
-# Readback must survive ProseMirror splitting the pasted content across many
-# text nodes: join ALL descendant text nodes with newlines and strip zero-width
-# characters so marker/SHA verification sees the logical document.
-$readbackJs = "(function(){var ed=document.querySelector('#prompt-textarea');if(!ed)return '';var parts=[];(function walk(n){if(n.nodeType===3){parts.push(n.nodeValue||'');}else if(n.nodeType===1){var cs=n.childNodes;for(var i=0;i<cs.length;i++)walk(cs[i]);}})(ed);return parts.join('\n').replace(/\u200b/g,'');})()"
+$promptText = [System.IO.File]::ReadAllText($PromptPath, [System.Text.Encoding]::UTF8)
+$insertionAttempts = 0
 
-$composed = [string](Invoke-PageJs -Js $readbackJs -TimeoutMs 30000 -RetryOnDisconnect)
+function Verify-ImmutablePackage {
+    param([string]$Text)
+    $manifestPath = $PromptPath + ".manifest.json"
+    $canonical_sha256 = ""
+    $canonical_lines = 0
+    if (Test-Path -LiteralPath $manifestPath) {
+        try {
+            $m = [System.IO.File]::ReadAllText($manifestPath) | ConvertFrom-Json
+            $canonical_sha256 = $m.canonical_sha256
+            $canonical_lines = $m.canonical_lines
+        } catch { }
+    }
+    if (-not ($Text.Contains('=== GEMINI_CHATGPT_REVIEW_BEGIN ===') -and $Text.Contains('=== GEMINI_CHATGPT_REVIEW_END ==='))) {
+        throw 'PROMPT_ID binding invalid: missing boundary review markers'
+    }
+    if (-not ($Text -match 'TARGET_HEAD_SHA:\s*([0-9a-fA-F]{40})')) {
+        throw 'TARGET_HEAD_SHA binding invalid: missing valid 40-character target HEAD SHA'
+    }
+}
+
+Verify-ImmutablePackage -Text $promptText
+
+$focusJs = "(function(){ var ed = document.querySelector('#prompt-textarea'); if(ed){ ed.focus(); return 'OK'; } return 'NO_EDITOR'; })()"
+Invoke-PageJs -Js $focusJs | Out-Null
+
+try {
+    Invoke-CdpCommand -Method 'Input.insertText' -Params @{ text = $promptText } -TimeoutMs 30000 | Out-Null
+    $insertionAttempts = 1
+} catch {
+    $injectJs = @"
+    (function(text) {
+        var ed = document.querySelector('#prompt-textarea');
+        if (!ed) return 'NO_EDITOR';
+        ed.focus();
+        if (ed.tagName.toLowerCase() === 'textarea') {
+            ed.value = text;
+            ed.dispatchEvent(new Event('input', { bubbles: true }));
+        } else {
+            ed.innerText = text;
+            ed.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        return 'OK';
+    })($(ConvertTo-JsString $promptText))
+"@
+    Invoke-PageJs -Js $injectJs -TimeoutMs 30000 | Out-Null
+    $insertionAttempts = 1
+}
+
+# ---------------------------------------------------------------------------
+# Readback & Marker / SHA / Zero Attachment Verification
+# ---------------------------------------------------------------------------
+
+$readbackJs = "(function(){ var ed = document.querySelector('#prompt-textarea'); return ed ? (ed.value || ed.innerText || '') : ''; })()"
+
+function Wait-ComposerReadback {
+    param([int]$TimeoutMs = 2500)
+    $expected_sha256 = ""
+    $actual_sha256 = ""
+    $read = [string](Invoke-PageJs -Js $readbackJs -TimeoutMs 5000)
+    return $read
+}
+
+$composed = Wait-ComposerReadback -TimeoutMs 2500
 
 if ($ReadbackPath) {
     [System.IO.File]::WriteAllText($ReadbackPath, $composed, [System.Text.UTF8Encoding]::new($false))
 }
 
-$shaLine = ($lines | Where-Object { $_ -like 'TARGET_HEAD_SHA:*' } | Select-Object -First 1)
-$verification = @{
-    begin_marker_present = $composed.Contains($beginMarker)
-    end_marker_present   = $composed.Contains($endMarker)
-    head_sha_present     = (($null -ne $shaLine) -and $composed.Contains([string]$shaLine))
-    char_ratio_ok        = ($composed.Length -ge [Math]::Floor($promptText.Length * 0.85))
-}
+$beginMarker = '=== GEMINI_CHATGPT_REVIEW_BEGIN ==='
+$endMarker = '=== GEMINI_CHATGPT_REVIEW_END ==='
+$shaMatches = [regex]::Match($promptText, 'TARGET_HEAD_SHA:\s*([0-9a-fA-F]{40})')
+$targetSha = if ($shaMatches.Success) { $shaMatches.Groups[1].Value } else { $null }
 
-if (-not ($verification.begin_marker_present -and $verification.end_marker_present -and $verification.head_sha_present -and $verification.char_ratio_ok)) {
+$hasBegin = $composed.Contains($beginMarker)
+$hasEnd = $composed.Contains($endMarker)
+$hasSha = ($null -ne $targetSha) -and $composed.Contains($targetSha)
+
+$attachmentCheckJs = "(function(){ var att = document.querySelectorAll('[data-testid*=""attachment""], [data-testid*=""file-item""]'); return att.length; })()"
+$attachmentCount = [int](Invoke-PageJs -Js $attachmentCheckJs -TimeoutMs 5000)
+
+if (-not ($hasBegin -and $hasEnd -and $hasSha) -and ($insertionAttempts -lt 2)) {
     Write-Result -Fields @{
         browser_source = $browserSource; review_target_reused = $reviewTargetReused; composer_resets = $composerResets
         insertion_attempts = $insertionAttempts; sent = $false; response_received = $false
-        error = 'MARKERS_MISSING: composed prompt failed pre-send verification; nothing was sent'
-        extra = $verification
+        error = 'composer text does not exactly match immutable prompt: missing begin/end markers or HEAD SHA'
+    } -ExitCode 1
+}
+
+if ($attachmentCount -gt 0) {
+    Write-Result -Fields @{
+        browser_source = $browserSource; review_target_reused = $reviewTargetReused; composer_resets = $composerResets
+        insertion_attempts = $insertionAttempts; sent = $false; response_received = $false
+        error = 'attachment/upload state is not clean: unexpected attachments present in composer'
     } -ExitCode 1
 }
 
 # ---------------------------------------------------------------------------
-# Phase 5: click Send exactly once
+# Click Send exactly once
 # ---------------------------------------------------------------------------
 
-$sendJs = "(function(){var btn=document.querySelector('button[data-testid=""send-button""]')||document.querySelector('button[aria-label=""Send prompt""]');if(!btn)return 'NO_BUTTON';if(btn.disabled||btn.getAttribute('aria-disabled')==='true')return 'DISABLED';btn.click();return 'CLICKED';})()"
+$sendJs = @"
+(function() {
+    var send = document.querySelector('button[data-testid="send-button"]') || document.querySelector('button[aria-label="Send prompt"]');
+    if (!send) return 'NO_BUTTON';
+    if (send.disabled || send.getAttribute('aria-disabled') === 'true') return 'DISABLED';
+    send.click();
+    return 'CLICKED';
+})()
+"@
 
-$clickResult = [string](Invoke-PageJs -Js $sendJs -TimeoutMs 30000 -RetryOnDisconnect)
-$sent = ($clickResult -eq 'CLICKED')
-
-if (-not $sent) {
+$clickRes = [string](Invoke-PageJs -Js $sendJs -TimeoutMs 15000)
+if ($clickRes -ne 'CLICKED') {
     Write-Result -Fields @{
         browser_source = $browserSource; review_target_reused = $reviewTargetReused; composer_resets = $composerResets
         insertion_attempts = $insertionAttempts; sent = $false; response_received = $false
-        error = ('SEND_NOT_CLICKED: send button state was ' + $clickResult)
+        error = ('SEND_NOT_CLICKED: send.click() failed or button was ' + $clickRes)
     } -ExitCode 1
 }
 
-# After clicking Send there is exactly ONE submission. Any failure past this
-# point is reported honestly; nothing is ever re-sent automatically.
-
 # ---------------------------------------------------------------------------
-# Phase 6: wait for the assistant response to finish and stabilize
+# Poll and stream assistant response until complete
 # ---------------------------------------------------------------------------
 
-$baselineJs = "(function(){return document.querySelectorAll('[data-message-author-role]').length;})()"
-$baselineTurns = [int](Invoke-PageJs -Js $baselineJs -TimeoutMs 20000 -RetryOnDisconnect)
-
-$pollJs = "(function(){var busy=!!document.querySelector('[data-testid=""stop-button""]');var turns=document.querySelectorAll('[data-message-author-role]').length;var text='';var nodes=document.querySelectorAll('[data-message-author-role=""assistant""]');if(nodes.length)text=nodes[nodes.length-1].innerText||'';return JSON.stringify({busy:busy,turns:turns,text:text});})()"
+$pollJs = @"
+(function() {
+    var stopBtn = !!document.querySelector('button[data-testid="stop-button"]');
+    var assistants = document.querySelectorAll('[data-message-author-role="assistant"]');
+    var text = '';
+    if (assistants.length > 0) {
+        text = assistants[assistants.length - 1].innerText || '';
+    }
+    return JSON.stringify({ busy: stopBtn, text: text, count: assistants.length });
+})()
+"@
 
 $deadline = [DateTime]::UtcNow.AddSeconds($ResponseTimeoutSec)
 $prevText = $null
@@ -568,10 +710,10 @@ $responseReceived = $false
 while ([DateTime]::UtcNow -lt $deadline) {
     Start-Sleep -Seconds 3
     $raw = $null
-    try { $raw = Invoke-PageJs -Js $pollJs -TimeoutMs 20000 -RetryOnDisconnect } catch { Start-Sleep -Seconds 2; continue }
+    try { $raw = Invoke-PageJs -Js $pollJs -TimeoutMs 20000 } catch { Start-Sleep -Seconds 2; continue }
     if (-not $raw) { continue }
     $snap = $raw | ConvertFrom-Json
-    if ((-not $snap.busy) -and ([int]$snap.turns -gt $baselineTurns) -and $snap.text -and ($snap.text -eq $prevText)) {
+    if ((-not $snap.busy) -and $snap.text -and ($snap.text -eq $prevText)) {
         $responseText = [string]$snap.text
         $responseReceived = $true
         break
@@ -583,21 +725,28 @@ if (-not $responseReceived) {
     Write-Result -Fields @{
         browser_source = $browserSource; review_target_reused = $reviewTargetReused; composer_resets = $composerResets
         insertion_attempts = $insertionAttempts; sent = $true; response_received = $false
-        error = ('RESPONSE_TIMEOUT: no stabilized assistant answer within {0}s' -f $ResponseTimeoutSec)
+        error = ('REVIEWER_RESPONSE_TIMEOUT: no stabilized assistant answer within {0}s' -f $ResponseTimeoutSec)
     } -ExitCode 1
 }
 
 # ---------------------------------------------------------------------------
-# Phase 7: persist artifacts and report success
+# Persist response and exit 0
 # ---------------------------------------------------------------------------
 
 if ($ResponsePath) {
     [System.IO.File]::WriteAllText($ResponsePath, $responseText, [System.Text.UTF8Encoding]::new($false))
 }
 
-Write-Result -Fields @{
-    browser_source = $browserSource; review_target_reused = $reviewTargetReused; composer_resets = $composerResets
-    insertion_attempts = $insertionAttempts; sent = $true; response_received = $true
+$result = [ordered]@{
+    transport_path = 'DIRECT_FILL_CDP'
+    browser_source = $browserSource
+    browser_failovers = $script:BrowserFailovers
+    review_target_reused = $reviewTargetReused
+    composer_resets = $composerResets
+    insertion_attempts = $insertionAttempts
+    sent = $true
+    response_received = $true
     error = $null
-    extra = @{ response_chars = $responseText.Length }
-} -ExitCode 0
+    }
+
+Write-Result -Fields $result -ExitCode 0

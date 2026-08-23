@@ -40,7 +40,7 @@ body {
   font-family: var(--font-family);
   background-color: var(--bg-main);
   color: var(--text-primary);
-  width: 620px;
+  width: 640px;
   height: 580px;
   overflow: hidden;
   user-select: none;
@@ -771,7 +771,7 @@ body {
   font-size: 11px;
   color: var(--text-secondary);
   flex: 1;
-  max-width: 180px;
+  max-width: 140px;
 }
 
 .folder-setting input {
@@ -789,16 +789,39 @@ body {
   border-color: var(--accent-primary);
 }
 
+.format-convert-setting {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.format-convert-setting select {
+  padding: 4px 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 11px;
+  outline: none;
+  cursor: pointer;
+}
+
+.format-convert-setting select:focus {
+  border-color: var(--accent-primary);
+}
+
 .delay-setting {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   font-size: 11px;
   color: var(--text-secondary);
 }
 
 .delay-setting select {
-  padding: 4px 8px;
+  padding: 4px 6px;
   background: var(--bg-input);
   border: 1px solid var(--border-color);
   border-radius: 4px;
@@ -814,8 +837,41 @@ body {
   gap: 8px;
 }
 
+.btn-zip {
+  padding: 8px 12px;
+  background: linear-gradient(135deg, #059669, #10b981);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+  transition: var(--transition-fast);
+  white-space: nowrap;
+}
+
+.btn-zip:hover:not(:disabled) {
+  background: linear-gradient(135deg, #047857, #059669);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.5);
+  transform: translateY(-1px);
+}
+
+.btn-zip:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn-zip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
 .btn-primary {
-  padding: 8px 16px;
+  padding: 8px 14px;
   background: linear-gradient(135deg, #6366f1, #4f46e5);
   border: 1px solid rgba(255, 255, 255, 0.15);
   color: #fff;
@@ -828,6 +884,7 @@ body {
   gap: 6px;
   box-shadow: 0 2px 8px rgba(99, 102, 241, 0.4);
   transition: var(--transition-fast);
+  white-space: nowrap;
 }
 
 .btn-primary:hover:not(:disabled) {

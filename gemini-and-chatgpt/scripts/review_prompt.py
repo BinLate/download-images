@@ -130,14 +130,26 @@ def build_prompt(project_root: str | Path, *, task_id: str | None = None, contra
         )
 
     diff = (diff_context or "").strip()
-    if len(diff) > 12000:
-        diff = diff[:12000] + "\n...[diff context truncated by prompt builder]..."
+    pr_url = str(delivery.get("pr_url") or "").strip()
+    repo = str(delivery.get("repository") or "").strip()
+    files_url = f"{pr_url}/files" if pr_url else f"https://github.com/{repo}/commit/{head}" if repo else ""
+
+    if len(diff) > 4000:
+        # Keep prompt lightweight: truncate huge inlined diff and direct reviewer to GitHub PR link
+        diff_summary = f"Full diff contains {len(diff.splitlines())} lines. Inspect full diff and changed files on GitHub: {files_url or pr_url or 'See PR URL above'}\n\nChanged files preview:\n" + "\n".join(f"- {f}" for f in (impl.get("changed_files") or []))
+        if not (impl.get("changed_files")):
+            # If changed_files list is empty, include the first few diff headers
+            headers = [line for line in diff.splitlines() if line.startswith("diff --git") or line.startswith("--- ") or line.startswith("+++ ")][:20]
+            diff_summary += "\n" + "\n".join(headers)
+        diff = diff_summary
     if not diff:
-        diff = "No inline diff supplied. Review the PR URL/current GitHub diff for the exact target SHA."
+        diff = f"No inline diff supplied. Review the PR URL / current GitHub diff at: {files_url or pr_url or 'See PR URL above'}"
 
     prompt_id = hashlib.sha256(
         f"{state['identity']['id']}|{review.get('round')}|{head}".encode("utf-8")
     ).hexdigest()[:24]
+
+    goal_text = req.get("goal") or state["identity"]["original_request"]
 
     sections = [
         "=== GEMINI_CHATGPT_REVIEW_BEGIN ===",
@@ -157,7 +169,7 @@ def build_prompt(project_root: str | Path, *, task_id: str | None = None, contra
         f"- Review round: {review.get('round')}/{review.get('max_rounds')}",
         "",
         "## Goal",
-        req.get("goal") or state["identity"]["original_request"],
+        goal_text,
         "",
         "## In scope",
         _bullets(req.get("in_scope") or []),
@@ -183,10 +195,12 @@ def build_prompt(project_root: str | Path, *, task_id: str | None = None, contra
         "## Pull request identity",
         f"- Repository: {delivery.get('repository')}",
         f"- PR: {delivery.get('pr_url') or delivery.get('pr_number')}",
+        f"- PR Files Changed: {files_url}",
         f"- PR state: {delivery.get('pr_state')}",
         f"- Base branch: {delivery.get('base_branch')}",
         f"- Head branch: {delivery.get('head_branch')}",
         f"- TARGET_HEAD_SHA: {head}",
+        f"- Review Instructions: Inspect code at {files_url or pr_url} for (1) Requirements alignment, (2) Feature correctness, (3) Security audit, (4) Feature recommendations.",
         "",
         "## Verification evidence bound to TARGET_HEAD_SHA",
         *evidence_lines,
