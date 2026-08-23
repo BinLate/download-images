@@ -1,0 +1,100 @@
+{
+  "blockers": [],
+  "checkpoint": {
+    "latest_at": "2026-08-23T06:52:03.704463+00:00",
+    "latest_path": ".ai/tasks/T-20260823-001-chrome-image-downloader-extension/checkpoints/20260823T065203704463+0000-IMPLEMENTING.json"
+  },
+  "classification": {
+    "architect_required": false,
+    "complexity_tier": "SIMPLE",
+    "human_precheck_required": false,
+    "kind": "UNKNOWN",
+    "planner_required": false,
+    "risk_level": "LOW",
+    "score": 0,
+    "signals": []
+  },
+  "decisions": [],
+  "delivery": {
+    "base_branch": null,
+    "head_branch": null,
+    "head_sha": null,
+    "last_push_at": null,
+    "pr_number": null,
+    "pr_state": null,
+    "pr_url": null,
+    "repository": null
+  },
+  "identity": {
+    "created_at": "2026-08-23T06:52:03.657900+00:00",
+    "id": "T-20260823-001-chrome-image-downloader-extension",
+    "normalized_title": "Chrome Image Downloader Extension",
+    "original_request": "Chrome Extension to extract, filter by dimensions, multi-select and sequentially download images",
+    "updated_at": "2026-08-23T06:52:03.704463+00:00"
+  },
+  "implementation": {
+    "branch": null,
+    "candidate_sha": null,
+    "changed_files": [],
+    "work_items_completed": [],
+    "work_items_remaining": []
+  },
+  "lifecycle": {
+    "current_state": "IMPLEMENTING",
+    "local_repair_attempts": 0,
+    "previous_state": "CLASSIFIED",
+    "resume_state": null,
+    "state_entered_at": "2026-08-23T06:52:03.704463+00:00",
+    "transition_reason": "simple task bypasses full planner"
+  },
+  "plan": {
+    "completed_count": 0,
+    "current_work_item": null,
+    "current_work_items": [],
+    "plan_path": null,
+    "required": false,
+    "status": "NOT_REQUIRED",
+    "work_item_count": 0
+  },
+  "release": {
+    "approved_sha": null,
+    "human_reason": null,
+    "human_required": false,
+    "merge_policy": "human_only",
+    "status": "PENDING"
+  },
+  "requirements": {
+    "acceptance_criteria": [],
+    "assumptions": [],
+    "constraints": [],
+    "goal": "Chrome Extension to extract, filter by dimensions, multi-select and sequentially download images",
+    "in_scope": [],
+    "out_of_scope": [],
+    "release_constraints": []
+  },
+  "review": {
+    "approval_valid": false,
+    "current_findings": [],
+    "current_target_sha": null,
+    "current_verdict": null,
+    "history_path": ".ai/tasks/T-20260823-001-chrome-image-downloader-extension/review-history.jsonl",
+    "max_rounds": 5,
+    "round": 0
+  },
+  "roles": {
+    "active": [
+      "ORCHESTRATOR"
+    ],
+    "completed": []
+  },
+  "schema_version": "2.0.0",
+  "verification": {
+    "candidate_sha": null,
+    "completed_checks": [],
+    "evidence_ledger_path": ".ai/tasks/T-20260823-001-chrome-image-downloader-extension/verification.jsonl",
+    "failed_checks": [],
+    "overall_status": "NOT_RUN",
+    "required_checks": [],
+    "skipped_checks": []
+  }
+}

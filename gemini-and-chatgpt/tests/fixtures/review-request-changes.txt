@@ -1,0 +1,6 @@
+TARGET_HEAD_SHA: 0123456789abcdef0123456789abcdef01234567
+VERDICT: REQUEST_CHANGES
+
+Blocking findings:
+- [B001] Add a regression test for the failing edge case.
+- [B002] Preserve authorization before mutating state.
