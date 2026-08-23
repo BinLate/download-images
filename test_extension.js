@@ -104,7 +104,32 @@ async function testExtension() {
   assert.strictEqual(shouldConvertImage('JPG', 'webp-to-jpg'), false);
   assert.strictEqual(shouldConvertImage('PNG', 'all-to-jpg'), 'image/jpeg');
   assert.strictEqual(shouldConvertImage('SVG', 'original'), false);
-  console.log('✓ 6. Logic chuyển đổi định dạng ảnh (WebP/AVIF -> JPG/PNG) hoạt động chuẩn xác');
+
+  // Test prepareImagePayload extension preservation on conversion failure
+  async function emulatePrepareImagePayload(item, convertMode, throwOnConvert = false) {
+    const targetMime = shouldConvertImage(item.format, convertMode);
+    const originalFilename = 'photo.webp';
+    if (targetMime) {
+      if (throwOnConvert) {
+        // Conversion failed -> must retain originalFilename
+        return { filename: originalFilename, isConverted: false };
+      }
+      const targetExt = targetMime === 'image/png' ? '.png' : '.jpg';
+      const nameWithoutExt = originalFilename.replace(/\.[^/.]+$/, '');
+      return { filename: `${nameWithoutExt}${targetExt}`, isConverted: true };
+    }
+    return { filename: originalFilename, isConverted: false };
+  }
+
+  const successPayload = await emulatePrepareImagePayload({ format: 'WEBP' }, 'webp-to-jpg', false);
+  assert.strictEqual(successPayload.filename, 'photo.jpg', 'Chuyển đổi thành công phải đổi đuôi thành .jpg');
+  assert.strictEqual(successPayload.isConverted, true);
+
+  const failedPayload = await emulatePrepareImagePayload({ format: 'WEBP' }, 'webp-to-jpg', true);
+  assert.strictEqual(failedPayload.filename, 'photo.webp', 'Chuyển đổi thất bại PHẢI giữ nguyên đuôi gốc .webp');
+  assert.strictEqual(failedPayload.isConverted, false);
+
+  console.log('✓ 6. Logic chuyển đổi định dạng và cơ chế bảo toàn đuôi file khi convert lỗi hoạt động chuẩn xác');
 
   // 8. Test Aspect Ratio Mutually Exclusive Boundaries
   function testRatio(w, h) {

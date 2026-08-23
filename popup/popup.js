@@ -699,23 +699,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function prepareImagePayload(item, index = 1, convertMode = 'original') {
     const targetMime = shouldConvertImage(item.format, convertMode);
-    let filename = getSanitizedFilename(item, index);
+    const originalFilename = getSanitizedFilename(item, index);
 
     if (targetMime) {
-      const targetExt = targetMime === 'image/png' ? '.png' : '.jpg';
-      const nameWithoutExt = filename.replace(/\.[^/.]+$/, '');
-      filename = `${nameWithoutExt}${targetExt}`;
-
       try {
         const convertedBlob = await convertImageToBlob(item.url, targetMime, 0.92, item.fallbackUrl);
-        return { blob: convertedBlob, filename, isConverted: true };
+        const targetExt = targetMime === 'image/png' ? '.png' : '.jpg';
+        const nameWithoutExt = originalFilename.replace(/\.[^/.]+$/, '');
+        const convertedFilename = `${nameWithoutExt}${targetExt}`;
+        return { blob: convertedBlob, filename: convertedFilename, isConverted: true };
       } catch (e) {
-        console.warn('Chuyển đổi ảnh thất bại, dùng file gốc:', item.url, e);
+        console.warn('Chuyển đổi ảnh thất bại, dùng file gốc và giữ nguyên định dạng:', item.url, e);
       }
     }
 
     const blob = await fetchImageAsBlob(item.url, item.fallbackUrl);
-    return { blob, filename, isConverted: false };
+    return { blob, filename: originalFilename, isConverted: false };
   }
 
   // =========================================================================
@@ -1029,15 +1028,24 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function downloadSingleFile(item) {
-    let filename = getSanitizedFilename(item, 1);
+    const convertMode = el.downloadFormatConvert ? el.downloadFormatConvert.value : 'original';
     const subfolder = getSanitizedSubfolder();
-    if (subfolder) {
-      filename = `${subfolder}/${filename}`;
-    }
-    showToast(`Đang tải: ${filename}`);
+    showToast(`Đang chuẩn bị tải: ${getFilenameFromUrl(item.url)}`);
     try {
-      await executeDownload(item.url, filename, item.fallbackUrl);
-      showToast(`Đã tải xong: ${filename}`);
+      const payload = await prepareImagePayload(item, 1, convertMode);
+      let finalFilename = payload.filename;
+      if (subfolder) {
+        finalFilename = `${subfolder}/${finalFilename}`;
+      }
+
+      if (payload.blob) {
+        const blobUrl = URL.createObjectURL(payload.blob);
+        await executeDownload(blobUrl, finalFilename);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 15000);
+      } else {
+        await executeDownload(item.url, finalFilename, item.fallbackUrl);
+      }
+      showToast(`Đã tải xong: ${finalFilename}`);
     } catch (err) {
       showToast('Lỗi khi tải ảnh: ' + (err.message || 'Thất bại'));
     }
