@@ -1,0 +1,660 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gemini-and-chatgpt.local/schemas/task-state.schema.json",
+  "title": "gemini-and-chatgpt v2 Task State",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "identity",
+    "classification",
+    "requirements",
+    "plan",
+    "roles",
+    "lifecycle",
+    "implementation",
+    "verification",
+    "delivery",
+    "review",
+    "decisions",
+    "blockers",
+    "release",
+    "checkpoint"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "2.0.0"
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "original_request",
+        "normalized_title",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^T-[0-9]{8}-[0-9]{3}-[a-z0-9][a-z0-9-]*$"
+        },
+        "original_request": {
+          "type": "string",
+          "minLength": 1
+        },
+        "normalized_title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "classification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "complexity_tier",
+        "risk_level",
+        "score",
+        "signals",
+        "architect_required",
+        "planner_required",
+        "human_precheck_required"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "BUGFIX",
+            "FEATURE",
+            "REFACTOR",
+            "DOCS",
+            "CONFIG_BUILD",
+            "TEST",
+            "DEPENDENCY",
+            "SECURITY",
+            "ARCHITECTURE",
+            "MAINTENANCE",
+            "UNKNOWN"
+          ]
+        },
+        "complexity_tier": {
+          "enum": [
+            "UNCLASSIFIED",
+            "SIMPLE",
+            "STANDARD",
+            "COMPLEX"
+          ]
+        },
+        "risk_level": {
+          "enum": [
+            "UNKNOWN",
+            "LOW",
+            "MEDIUM",
+            "HIGH",
+            "CRITICAL"
+          ]
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0
+        },
+        "signals": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "architect_required": {
+          "type": "boolean"
+        },
+        "planner_required": {
+          "type": "boolean"
+        },
+        "human_precheck_required": {
+          "type": "boolean"
+        }
+      }
+    },
+    "requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "goal",
+        "in_scope",
+        "out_of_scope",
+        "constraints",
+        "acceptance_criteria",
+        "release_constraints",
+        "assumptions"
+      ],
+      "properties": {
+        "goal": {
+          "type": "string",
+          "minLength": 1
+        },
+        "in_scope": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "out_of_scope": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "constraints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "acceptance_criteria": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "release_constraints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "assumptions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required",
+        "status",
+        "plan_path",
+        "work_item_count",
+        "completed_count",
+        "current_work_item"
+      ],
+      "properties": {
+        "required": {
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "NOT_REQUIRED",
+            "PENDING",
+            "READY",
+            "IN_PROGRESS",
+            "COMPLETE",
+            "BLOCKED"
+          ]
+        },
+        "plan_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "work_item_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "completed_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "current_work_item": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "roles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "active",
+        "completed"
+      ],
+      "properties": {
+        "active": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/role"
+          },
+          "uniqueItems": true
+        },
+        "completed": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/role"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "lifecycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "current_state",
+        "previous_state",
+        "state_entered_at",
+        "transition_reason",
+        "resume_state",
+        "local_repair_attempts"
+      ],
+      "properties": {
+        "current_state": {
+          "$ref": "#/$defs/state"
+        },
+        "previous_state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/state"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state_entered_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "transition_reason": {
+          "type": "string"
+        },
+        "resume_state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/state"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "local_repair_attempts": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "implementation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "branch",
+        "candidate_sha",
+        "changed_files",
+        "work_items_completed",
+        "work_items_remaining"
+      ],
+      "properties": {
+        "branch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "candidate_sha": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/fullSha"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "changed_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "work_items_completed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "work_items_remaining": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "overall_status",
+        "candidate_sha",
+        "required_checks",
+        "completed_checks",
+        "failed_checks",
+        "skipped_checks",
+        "evidence_ledger_path"
+      ],
+      "properties": {
+        "overall_status": {
+          "enum": [
+            "NOT_RUN",
+            "PASS",
+            "FAIL",
+            "BLOCKED",
+            "PARTIAL"
+          ]
+        },
+        "candidate_sha": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/fullSha"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "required_checks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "completed_checks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "failed_checks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "skipped_checks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "evidence_ledger_path": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "delivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "base_branch",
+        "head_branch",
+        "pr_number",
+        "pr_url",
+        "pr_state",
+        "head_sha",
+        "last_push_at"
+      ],
+      "properties": {
+        "repository": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "base_branch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "head_branch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pr_number": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "pr_url": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "uri"
+        },
+        "pr_state": {
+          "enum": [
+            null,
+            "OPEN",
+            "CLOSED",
+            "MERGED"
+          ]
+        },
+        "head_sha": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/fullSha"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_push_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "round",
+        "max_rounds",
+        "current_target_sha",
+        "current_verdict",
+        "current_findings",
+        "history_path",
+        "approval_valid"
+      ],
+      "properties": {
+        "round": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_rounds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "current_target_sha": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/fullSha"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "current_verdict": {
+          "enum": [
+            null,
+            "APPROVED_TO_MERGE",
+            "REQUEST_CHANGES",
+            "NEEDS_HUMAN_DECISION"
+          ]
+        },
+        "current_findings": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "history_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "approval_valid": {
+          "type": "boolean"
+        }
+      }
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "merge_policy",
+        "human_required",
+        "human_reason",
+        "approved_sha"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "PENDING",
+            "APPROVED",
+            "BLOCKED",
+            "HUMAN_DECISION"
+          ]
+        },
+        "merge_policy": {
+          "enum": [
+            "human_only",
+            "explicit_auto_merge"
+          ]
+        },
+        "human_required": {
+          "type": "boolean"
+        },
+        "human_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "approved_sha": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/fullSha"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "checkpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "latest_path",
+        "latest_at"
+      ],
+      "properties": {
+        "latest_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "latest_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "fullSha": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{40}$"
+    },
+    "role": {
+      "enum": [
+        "ORCHESTRATOR",
+        "PLANNER",
+        "ARCHITECT",
+        "BUILDER",
+        "VERIFIER",
+        "CONTEXT_MANAGER",
+        "DELIVERY_GATE",
+        "EXTERNAL_REVIEWER",
+        "HUMAN"
+      ]
+    },
+    "state": {
+      "enum": [
+        "RECEIVED",
+        "CLASSIFIED",
+        "PLANNING",
+        "PLAN_READY",
+        "IMPLEMENTING",
+        "VERIFYING",
+        "PR_PREPARING",
+        "REVIEWING",
+        "FIXING",
+        "RELEASE_GATE",
+        "APPROVED",
+        "BLOCKED",
+        "HUMAN_DECISION",
+        "REVIEW_LIMIT_REACHED",
+        "FAILED",
+        "ABORTED"
+      ]
+    }
+  }
+}
