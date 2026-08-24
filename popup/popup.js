@@ -378,6 +378,7 @@ document.addEventListener('DOMContentLoaded', () => {
               measureTimer = setTimeout(() => {
                 if (reFilterNeeded) {
                   applyFilters();
+                  selectAllFiltered();
                   render();
                 }
               }, 300);
@@ -1263,6 +1264,7 @@ document.addEventListener('DOMContentLoaded', () => {
       clearTimeout(searchTimer);
       searchTimer = setTimeout(() => {
         applyFilters();
+        selectAllFiltered();
         render();
       }, 200);
     });
@@ -1272,6 +1274,7 @@ document.addEventListener('DOMContentLoaded', () => {
       state.searchQuery = '';
       el.btnClearSearch.classList.add('hidden');
       applyFilters();
+      selectAllFiltered();
       render();
     });
 
@@ -1303,6 +1306,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         applyFilters();
+        selectAllFiltered();
         render();
         saveFilterPreferences();
       });
@@ -1315,6 +1319,7 @@ document.addEventListener('DOMContentLoaded', () => {
         chip.classList.add('active');
         state.activeRatio = chip.dataset.ratio;
         applyFilters();
+        selectAllFiltered();
         render();
         saveFilterPreferences();
       });
@@ -1327,6 +1332,7 @@ document.addEventListener('DOMContentLoaded', () => {
         chip.classList.add('active');
         state.activeFormat = chip.dataset.format;
         applyFilters();
+        selectAllFiltered();
         render();
         saveFilterPreferences();
       });
@@ -1349,6 +1355,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       applyFilters();
+      selectAllFiltered();
       render();
       saveFilterPreferences();
     };
@@ -1380,6 +1387,7 @@ document.addEventListener('DOMContentLoaded', () => {
       el.formatChips.forEach(c => c.classList.toggle('active', c.dataset.format === 'ALL'));
 
       applyFilters();
+      selectAllFiltered();
       render();
       saveFilterPreferences();
     };

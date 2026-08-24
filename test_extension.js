@@ -507,8 +507,9 @@ async function testExtension() {
     vm.runInNewContext(popupJsCode, h1.sandbox);
 
     for (const fn of h1.listeners['DOMContentLoaded'] || []) {
-      await fn();
+      fn();
     }
+    await new Promise(r => setTimeout(r, 60));
 
     // Verify initial state
     assert(h1.presetChips[0].classList.contains('active'), 'Initial "all" preset chip must be active');
@@ -521,21 +522,30 @@ async function testExtension() {
     assert.strictEqual(sharedStorage.minWidth, 640, 'minWidth 640 must be persisted in storage');
     assert.strictEqual(sharedStorage.activePreset, 'custom', 'activePreset must be custom in storage');
     assert(!h1.presetChips[0].classList.contains('active'), 'all chip must be deactivated when custom dimension entered');
+    assert(h1.elementsById['selection-counter'].innerHTML.includes('1'), 'Matching images must be auto-selected upon filter change');
+
+    // Step 2b: User sets custom min-height 249
+    minWidthEl.value = '';
+    const minHeightEl = h1.elementsById['min-height'];
+    minHeightEl.value = '249';
+    minHeightEl.dispatchEvent('input');
+    assert(h1.elementsById['selection-counter'].innerHTML.includes('1'), 'Matching images must be auto-selected upon minHeight filter change');
+    minHeightEl.value = '';
+    minHeightEl.dispatchEvent('input');
 
     // Step 3: User clears all custom dimensions
-    minWidthEl.value = '';
-    minWidthEl.dispatchEvent('input');
-
     assert.strictEqual(sharedStorage.activePreset, 'all', 'activePreset must revert to all in storage');
     assert(h1.presetChips[0].classList.contains('active'), 'all chip must be activated when dimensions cleared');
+    assert(h1.elementsById['selection-counter'].innerHTML.includes('2'), 'All images must be auto-selected when dimensions cleared');
 
     // Step 4: Recreate/reload popup DOM (simulating reopening extension popup)
     const h2 = createDOMHarness(sharedStorage);
     vm.runInNewContext(popupJsCode, h2.sandbox);
 
     for (const fn of h2.listeners['DOMContentLoaded'] || []) {
-      await fn();
+      fn();
     }
+    await new Promise(r => setTimeout(r, 60));
 
     assert(h2.presetChips[0].classList.contains('active'), 'all chip must be active upon popup reopen');
     assert.strictEqual(h2.elementsById['min-width'].value, '', 'min-width input must remain empty');
