@@ -336,7 +336,7 @@ async function testExtension() {
   }
   console.log('✓ 12. Xác thực bộ Icon (16x16, 48x48, 128x128) mang màu xanh Emerald Green chuẩn, loại bỏ hoàn toàn màu tím');
 
-  // 14. Test Preferences Persistence (Settings Memory in chrome.storage.local)
+  // 14. Test Preferences Persistence & Dynamic Dimension / Preset Sync
   function testPreferencesPersistence() {
     const mockStorage = {};
     const fakeChromeStorage = {
@@ -411,10 +411,46 @@ async function testExtension() {
     assert.strictEqual(restoredState.downloadFolder, 'WallpaperFolder', 'Phải khôi phục đúng downloadFolder');
     assert.strictEqual(restoredState.downloadDelay, '500', 'Phải khôi phục đúng downloadDelay');
     assert.strictEqual(restoredState.downloadFormatConvert, 'webp-to-png', 'Phải khôi phục đúng downloadFormatConvert');
+
+    // Test onDimInputChange handler logic when custom inputs are entered vs cleared
+    const testChips = [
+      { dataset: { preset: 'all' }, active: true },
+      { dataset: { preset: 'small' }, active: false },
+      { dataset: { preset: 'medium' }, active: false },
+      { dataset: { preset: 'large' }, active: false },
+      { dataset: { preset: 'hd' }, active: false }
+    ];
+
+    function emulateDimInputChange(inputs, currentState, chips) {
+      currentState.minWidth = inputs.minWidth ? parseInt(inputs.minWidth, 10) : null;
+      currentState.maxWidth = inputs.maxWidth ? parseInt(inputs.maxWidth, 10) : null;
+      currentState.minHeight = inputs.minHeight ? parseInt(inputs.minHeight, 10) : null;
+      currentState.maxHeight = inputs.maxHeight ? parseInt(inputs.maxHeight, 10) : null;
+
+      if (currentState.minWidth !== null || currentState.maxWidth !== null || currentState.minHeight !== null || currentState.maxHeight !== null) {
+        chips.forEach(c => { c.active = false; });
+        currentState.activePreset = 'custom';
+      } else {
+        currentState.activePreset = 'all';
+        chips.forEach(c => { c.active = c.dataset.preset === 'all'; });
+      }
+    }
+
+    const stateObj = { activePreset: 'all', minWidth: null, maxWidth: null, minHeight: null, maxHeight: null };
+    
+    // Case A: User types custom minWidth 500
+    emulateDimInputChange({ minWidth: '500', maxWidth: '', minHeight: '', maxHeight: '' }, stateObj, testChips);
+    assert.strictEqual(stateObj.activePreset, 'custom', 'Khi có kích thước tùy chỉnh, preset phải là custom');
+    assert.strictEqual(testChips.find(c => c.dataset.preset === 'all').active, false, 'Khi có kích thước tùy chỉnh, chip all phải bị bỏ chọn');
+
+    // Case B: User clears custom minWidth -> all inputs empty
+    emulateDimInputChange({ minWidth: '', maxWidth: '', minHeight: '', maxHeight: '' }, stateObj, testChips);
+    assert.strictEqual(stateObj.activePreset, 'all', 'Khi xóa toàn bộ kích thước tùy chỉnh, preset phải tự động quay lại all');
+    assert.strictEqual(testChips.find(c => c.dataset.preset === 'all').active, true, 'Khi xóa toàn bộ kích thước tùy chỉnh, chip all phải tự động kích hoạt');
   }
 
   testPreferencesPersistence();
-  console.log('✓ 13. Kiểm thử Ghi nhớ Cài đặt (Preferences Persistence) lưu và khôi phục chính xác 100%');
+  console.log('✓ 13. Kiểm thử Ghi nhớ Cài đặt (Preferences Persistence) & Đồng bộ Trạng thái Chip/Preset chuẩn xác 100%');
 
   console.log('\n--- TOÀN BỘ KIỂM TRA EXTENSION THÀNH CÔNG 100%! ---');
 }

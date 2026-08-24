@@ -1339,10 +1339,13 @@ document.addEventListener('DOMContentLoaded', () => {
       state.minHeight = el.minHeightInput.value ? parseInt(el.minHeightInput.value, 10) : null;
       state.maxHeight = el.maxHeightInput.value ? parseInt(el.maxHeightInput.value, 10) : null;
 
-      // Deactivate presets if custom dimensions entered
-      if (state.minWidth || state.maxWidth || state.minHeight || state.maxHeight) {
+      // Deactivate presets if custom dimensions entered, or revert to 'all' if all cleared
+      if (state.minWidth !== null || state.maxWidth !== null || state.minHeight !== null || state.maxHeight !== null) {
         el.presetChips.forEach(c => c.classList.remove('active'));
         state.activePreset = 'custom';
+      } else {
+        state.activePreset = 'all';
+        el.presetChips.forEach(c => c.classList.toggle('active', c.dataset.preset === 'all'));
       }
 
       applyFilters();
