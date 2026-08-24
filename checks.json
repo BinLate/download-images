@@ -1,0 +1,8 @@
+[
+  {
+    "check_id": "test_extension_structure",
+    "category": "FOCUSED_TEST",
+    "command": "node test_extension.js",
+    "required": true
+  }
+]

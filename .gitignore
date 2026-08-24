@@ -1,0 +1,13 @@
+# Skills & AI Orchestration infrastructure
+.agents/
+.ai/
+gemini-and-chatgpt/
+
+# Python & Caches
+__pycache__/
+*.pyc
+.pytest_cache/
+*.pma
+*.dat
+*.log
+*.jsonl
