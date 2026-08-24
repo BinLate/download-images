@@ -336,123 +336,216 @@ async function testExtension() {
   }
   console.log('✓ 12. Xác thực bộ Icon (16x16, 48x48, 128x128) mang màu xanh Emerald Green chuẩn, loại bỏ hoàn toàn màu tím');
 
-  // 14. Test Preferences Persistence & Dynamic Dimension / Preset Sync
-  function testPreferencesPersistence() {
-    const mockStorage = {};
-    const fakeChromeStorage = {
-      local: {
-        async get(keys) {
-          const result = {};
-          keys.forEach(k => {
-            if (k in mockStorage) result[k] = mockStorage[k];
-          });
-          return result;
-        },
-        async set(items) {
-          Object.assign(mockStorage, items);
+  // 14. Direct DOM-Level Production popup.js Execution & Persistence Lifecycle Test
+  const vm = require('vm');
+  async function testProductionPopupDOMExecution() {
+    const popupJsPath = path.join(__dirname, 'popup', 'popup.js');
+    const popupJsCode = fs.readFileSync(popupJsPath, 'utf8');
+
+    function createDOMHarness(storageMap = {}) {
+      const listeners = {};
+      const elementsById = {};
+
+      class DOMElement {
+        constructor(tag, id = '', className = '', dataset = {}) {
+          this.tagName = tag.toUpperCase();
+          this.id = id;
+          this.className = className;
+          this.children = [];
+          this.classList = {
+            _classes: new Set(className ? className.split(/\s+/).filter(Boolean) : []),
+            add: (...c) => c.forEach(cls => this.classList._classes.add(cls)),
+            remove: (...c) => c.forEach(cls => this.classList._classes.delete(cls)),
+            toggle: (cls, force) => {
+              if (force === undefined) {
+                if (this.classList._classes.has(cls)) this.classList._classes.delete(cls);
+                else this.classList._classes.add(cls);
+              } else if (force) {
+                this.classList._classes.add(cls);
+              } else {
+                this.classList._classes.delete(cls);
+              }
+            },
+            contains: (cls) => this.classList._classes.has(cls)
+          };
+          this.dataset = { ...dataset };
+          this.value = '';
+          this.checked = false;
+          this.indeterminate = false;
+          this.disabled = false;
+          this.textContent = '';
+          this.innerHTML = '';
+          this.src = '';
+          this.href = '';
+          this.style = {};
+          this._eventHandlers = {};
+        }
+
+        appendChild(child) {
+          this.children.push(child);
+          return child;
+        }
+
+        addEventListener(event, handler) {
+          if (!this._eventHandlers[event]) this._eventHandlers[event] = [];
+          this._eventHandlers[event].push(handler);
+        }
+
+        dispatchEvent(event) {
+          const type = typeof event === 'string' ? event : event.type;
+          const target = typeof event === 'string' ? this : (event.target || this);
+          if (this._eventHandlers[type]) {
+            this._eventHandlers[type].forEach(fn => fn({ target, type }));
+          }
+        }
+
+        querySelector(sel) {
+          return new DOMElement('div');
+        }
+
+        querySelectorAll(sel) {
+          return [];
         }
       }
-    };
 
-    // Save preferences
-    const samplePrefs = {
-      activePreset: 'large',
-      activeRatio: 'LANDSCAPE',
-      activeFormat: 'PNG',
-      minWidth: 600,
-      maxWidth: 1920,
-      minHeight: 400,
-      maxHeight: 1080,
-      sortOrder: 'width-desc',
-      downloadFolder: 'WallpaperFolder',
-      downloadDelay: '500',
-      downloadFormatConvert: 'webp-to-png'
-    };
+      // Populate required elements from popup.html
+      const ids = [
+        'total-count-badge', 'btn-deep-scroll', 'btn-refresh', 'search-input', 'btn-clear-search',
+        'sort-select', 'min-width', 'max-width', 'min-height', 'max-height', 'btn-reset-filters',
+        'checkbox-select-all', 'btn-invert-selection', 'btn-copy-urls', 'btn-export-txt',
+        'selection-counter', 'filtered-count', 'image-grid', 'loading-state', 'loading-title',
+        'loading-desc', 'empty-state', 'btn-empty-reset', 'progress-container', 'progress-status-text',
+        'progress-percentage', 'progress-bar-fill', 'download-folder', 'download-format-convert',
+        'download-delay', 'btn-download-zip', 'zip-btn-text', 'btn-download-selected',
+        'download-btn-text', 'btn-cancel-download', 'preview-modal', 'btn-prev-modal',
+        'btn-next-modal', 'btn-close-modal', 'modal-preview-img', 'modal-image-title',
+        'modal-image-dimensions', 'modal-format', 'modal-source', 'modal-url',
+        'modal-btn-open-tab', 'modal-btn-copy-url', 'modal-btn-download', 'toast'
+      ];
 
-    fakeChromeStorage.local.set(samplePrefs);
+      ids.forEach(id => {
+        elementsById[id] = new DOMElement('div', id);
+      });
 
-    // Emulate popup state loading
-    const restoredState = {
-      activePreset: 'all',
-      activeRatio: 'ALL',
-      activeFormat: 'ALL',
-      minWidth: null,
-      maxWidth: null,
-      minHeight: null,
-      maxHeight: null,
-      sortOrder: 'default',
-      downloadFolder: '',
-      downloadDelay: '300',
-      downloadFormatConvert: 'original'
-    };
+      // Preset chips
+      const presetNames = ['all', 'small', 'medium', 'large', 'hd'];
+      const presetChips = presetNames.map(p => new DOMElement('button', '', p === 'all' ? 'chip active' : 'chip', { preset: p }));
 
-    // Emulate loadPreferences
-    const loadedData = mockStorage;
-    if (loadedData.activePreset !== undefined) restoredState.activePreset = loadedData.activePreset;
-    if (loadedData.activeRatio !== undefined) restoredState.activeRatio = loadedData.activeRatio;
-    if (loadedData.activeFormat !== undefined) restoredState.activeFormat = loadedData.activeFormat;
-    if (loadedData.minWidth !== undefined) restoredState.minWidth = loadedData.minWidth;
-    if (loadedData.maxWidth !== undefined) restoredState.maxWidth = loadedData.maxWidth;
-    if (loadedData.minHeight !== undefined) restoredState.minHeight = loadedData.minHeight;
-    if (loadedData.maxHeight !== undefined) restoredState.maxHeight = loadedData.maxHeight;
-    if (loadedData.sortOrder !== undefined) restoredState.sortOrder = loadedData.sortOrder;
-    if (loadedData.downloadFolder !== undefined) restoredState.downloadFolder = loadedData.downloadFolder;
-    if (loadedData.downloadDelay !== undefined) restoredState.downloadDelay = loadedData.downloadDelay;
-    if (loadedData.downloadFormatConvert !== undefined) restoredState.downloadFormatConvert = loadedData.downloadFormatConvert;
+      // Ratio chips
+      const ratioNames = ['ALL', 'LANDSCAPE', 'PORTRAIT', 'SQUARE'];
+      const ratioChips = ratioNames.map(r => new DOMElement('button', '', r === 'ALL' ? 'ratio-chip active' : 'ratio-chip', { ratio: r }));
 
-    assert.strictEqual(restoredState.activePreset, 'large', 'Phải khôi phục đúng activePreset');
-    assert.strictEqual(restoredState.activeRatio, 'LANDSCAPE', 'Phải khôi phục đúng activeRatio');
-    assert.strictEqual(restoredState.activeFormat, 'PNG', 'Phải khôi phục đúng activeFormat');
-    assert.strictEqual(restoredState.minWidth, 600, 'Phải khôi phục đúng minWidth');
-    assert.strictEqual(restoredState.maxWidth, 1920, 'Phải khôi phục đúng maxWidth');
-    assert.strictEqual(restoredState.minHeight, 400, 'Phải khôi phục đúng minHeight');
-    assert.strictEqual(restoredState.maxHeight, 1080, 'Phải khôi phục đúng maxHeight');
-    assert.strictEqual(restoredState.sortOrder, 'width-desc', 'Phải khôi phục đúng sortOrder');
-    assert.strictEqual(restoredState.downloadFolder, 'WallpaperFolder', 'Phải khôi phục đúng downloadFolder');
-    assert.strictEqual(restoredState.downloadDelay, '500', 'Phải khôi phục đúng downloadDelay');
-    assert.strictEqual(restoredState.downloadFormatConvert, 'webp-to-png', 'Phải khôi phục đúng downloadFormatConvert');
+      // Format chips
+      const formatNames = ['ALL', 'JPG', 'PNG', 'WEBP', 'SVG', 'GIF', 'OTHER'];
+      const formatChips = formatNames.map(f => new DOMElement('button', '', f === 'ALL' ? 'format-chip active' : 'format-chip', { format: f }));
 
-    // Test onDimInputChange handler logic when custom inputs are entered vs cleared
-    const testChips = [
-      { dataset: { preset: 'all' }, active: true },
-      { dataset: { preset: 'small' }, active: false },
-      { dataset: { preset: 'medium' }, active: false },
-      { dataset: { preset: 'large' }, active: false },
-      { dataset: { preset: 'hd' }, active: false }
-    ];
+      const doc = {
+        getElementById: (id) => elementsById[id] || new DOMElement('div', id),
+        querySelectorAll: (sel) => {
+          if (sel === '.chip[data-preset]') return presetChips;
+          if (sel === '.ratio-chip[data-ratio]') return ratioChips;
+          if (sel === '.format-chip[data-format]') return formatChips;
+          return [];
+        },
+        querySelector: (sel) => {
+          if (sel.startsWith('#')) return elementsById[sel.slice(1)] || null;
+          return new DOMElement('div');
+        },
+        createElement: (tag) => new DOMElement(tag),
+        createDocumentFragment: () => new DOMElement('fragment'),
+        addEventListener: (event, handler) => {
+          if (!listeners[event]) listeners[event] = [];
+          listeners[event].push(handler);
+        }
+      };
 
-    function emulateDimInputChange(inputs, currentState, chips) {
-      currentState.minWidth = inputs.minWidth ? parseInt(inputs.minWidth, 10) : null;
-      currentState.maxWidth = inputs.maxWidth ? parseInt(inputs.maxWidth, 10) : null;
-      currentState.minHeight = inputs.minHeight ? parseInt(inputs.minHeight, 10) : null;
-      currentState.maxHeight = inputs.maxHeight ? parseInt(inputs.maxHeight, 10) : null;
+      const chromeMock = {
+        storage: {
+          local: {
+            get: async (keys) => {
+              const res = {};
+              keys.forEach(k => { if (k in storageMap) res[k] = storageMap[k]; });
+              return res;
+            },
+            set: async (items) => {
+              Object.assign(storageMap, items);
+            }
+          }
+        },
+        tabs: {
+          query: async () => [{ id: 1, title: 'Sample Page', url: 'https://example.com' }]
+        },
+        scripting: {
+          executeScript: async () => [{
+            result: [
+              { url: 'https://example.com/photo1.jpg', width: 1200, height: 800, format: 'JPG' },
+              { url: 'https://example.com/photo2.png', width: 200, height: 200, format: 'PNG' }
+            ]
+          }]
+        }
+      };
 
-      if (currentState.minWidth !== null || currentState.maxWidth !== null || currentState.minHeight !== null || currentState.maxHeight !== null) {
-        chips.forEach(c => { c.active = false; });
-        currentState.activePreset = 'custom';
-      } else {
-        currentState.activePreset = 'all';
-        chips.forEach(c => { c.active = c.dataset.preset === 'all'; });
-      }
+      const sandbox = {
+        document: doc,
+        window: { location: { href: 'popup.html' } },
+        chrome: chromeMock,
+        console: { log: () => {}, warn: () => {}, error: () => {} },
+        setTimeout: (fn) => setTimeout(fn, 0),
+        clearTimeout: (id) => clearTimeout(id),
+        setInterval: () => {},
+        clearInterval: () => {},
+        Image: function() { this.onload = null; this.src = ''; },
+        CSS: { escape: s => s }
+      };
+
+      return { sandbox, elementsById, presetChips, ratioChips, formatChips, storageMap, listeners };
     }
 
-    const stateObj = { activePreset: 'all', minWidth: null, maxWidth: null, minHeight: null, maxHeight: null };
-    
-    // Case A: User types custom minWidth 500
-    emulateDimInputChange({ minWidth: '500', maxWidth: '', minHeight: '', maxHeight: '' }, stateObj, testChips);
-    assert.strictEqual(stateObj.activePreset, 'custom', 'Khi có kích thước tùy chỉnh, preset phải là custom');
-    assert.strictEqual(testChips.find(c => c.dataset.preset === 'all').active, false, 'Khi có kích thước tùy chỉnh, chip all phải bị bỏ chọn');
+    // Run 1: First Popup Load & User Interaction
+    const sharedStorage = {};
+    const h1 = createDOMHarness(sharedStorage);
+    vm.runInNewContext(popupJsCode, h1.sandbox);
 
-    // Case B: User clears custom minWidth -> all inputs empty
-    emulateDimInputChange({ minWidth: '', maxWidth: '', minHeight: '', maxHeight: '' }, stateObj, testChips);
-    assert.strictEqual(stateObj.activePreset, 'all', 'Khi xóa toàn bộ kích thước tùy chỉnh, preset phải tự động quay lại all');
-    assert.strictEqual(testChips.find(c => c.dataset.preset === 'all').active, true, 'Khi xóa toàn bộ kích thước tùy chỉnh, chip all phải tự động kích hoạt');
+    for (const fn of h1.listeners['DOMContentLoaded'] || []) {
+      await fn();
+    }
+
+    // Verify initial state
+    assert(h1.presetChips[0].classList.contains('active'), 'Initial "all" preset chip must be active');
+
+    // Step 2: User enters custom dimension
+    const minWidthEl = h1.elementsById['min-width'];
+    minWidthEl.value = '640';
+    minWidthEl.dispatchEvent('input');
+
+    assert.strictEqual(sharedStorage.minWidth, 640, 'minWidth 640 must be persisted in storage');
+    assert.strictEqual(sharedStorage.activePreset, 'custom', 'activePreset must be custom in storage');
+    assert(!h1.presetChips[0].classList.contains('active'), 'all chip must be deactivated when custom dimension entered');
+
+    // Step 3: User clears all custom dimensions
+    minWidthEl.value = '';
+    minWidthEl.dispatchEvent('input');
+
+    assert.strictEqual(sharedStorage.activePreset, 'all', 'activePreset must revert to all in storage');
+    assert(h1.presetChips[0].classList.contains('active'), 'all chip must be activated when dimensions cleared');
+
+    // Step 4: Recreate/reload popup DOM (simulating reopening extension popup)
+    const h2 = createDOMHarness(sharedStorage);
+    vm.runInNewContext(popupJsCode, h2.sandbox);
+
+    for (const fn of h2.listeners['DOMContentLoaded'] || []) {
+      await fn();
+    }
+
+    assert(h2.presetChips[0].classList.contains('active'), 'all chip must be active upon popup reopen');
+    assert.strictEqual(h2.elementsById['min-width'].value, '', 'min-width input must remain empty');
   }
 
-  testPreferencesPersistence();
-  console.log('✓ 13. Kiểm thử Ghi nhớ Cài đặt (Preferences Persistence) & Đồng bộ Trạng thái Chip/Preset chuẩn xác 100%');
+  await testProductionPopupDOMExecution();
+  console.log('✓ 14. Kiểm thử DOM-Level trực tiếp mã nguồn production popup.js & Vòng đời Đồng bộ Preferences thành công');
 
   console.log('\n--- TOÀN BỘ KIỂM TRA EXTENSION THÀNH CÔNG 100%! ---');
+
 }
 
 testExtension();
