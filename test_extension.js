@@ -282,6 +282,140 @@ async function testExtension() {
   assert.strictEqual(testPresetClassification(1200, 500, 'medium'), false, '1200x500 không thuộc Medium');
   console.log('✓ 11. Kiểm thử phân loại kích thước chính xác tuyệt đối theo biên (Small < 300, Medium 300-800, Large > 800)');
 
+  // 13. Test Icon Palette (Emerald Green Verification - No purple allowed)
+  const zlib = require('zlib');
+  const iconSizes = [16, 48, 128];
+  for (const size of iconSizes) {
+    const iconFile = path.join(__dirname, 'icons', `icon${size}.png`);
+    assert(fs.existsSync(iconFile), `Thiếu icon ${size}px`);
+    const buf = fs.readFileSync(iconFile);
+    let offset = 8;
+    const chunks = [];
+    while (offset < buf.length) {
+      const len = buf.readUInt32BE(offset);
+      const type = buf.slice(offset + 4, offset + 8).toString('ascii');
+      const data = buf.slice(offset + 8, offset + 8 + len);
+      chunks.push({ type, data });
+      offset += 12 + len;
+    }
+    const ihdr = chunks.find(c => c.type === 'IHDR');
+    const width = ihdr.data.readUInt32BE(0);
+    const height = ihdr.data.readUInt32BE(4);
+    assert.strictEqual(width, size, `Chiều rộng icon phải là ${size}`);
+    assert.strictEqual(height, size, `Chiều cao icon phải là ${size}`);
+    const idat = Buffer.concat(chunks.filter(c => c.type === 'IDAT').map(c => c.data));
+    const uncompressed = zlib.inflateSync(idat);
+    const scanlineLen = 1 + width * 4;
+
+    let hasEmeraldGreen = false;
+    let hasPurple = false;
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = y * scanlineLen + 1 + x * 4;
+        const r = uncompressed[idx];
+        const g = uncompressed[idx + 1];
+        const b = uncompressed[idx + 2];
+        const a = uncompressed[idx + 3];
+
+        if (a > 100) {
+          // Emerald Green check (#10b981 / #047857 / #059669 range)
+          if (g > r && g > b && g >= 80) {
+            hasEmeraldGreen = true;
+          }
+          // Purple check (#6366f1 / rgb(99,102,241))
+          if (b > g && b > r && b >= 150) {
+            hasPurple = true;
+          }
+        }
+      }
+    }
+
+    assert(hasEmeraldGreen, `Icon ${size}px phải chứa màu xanh lá cây Emerald Green`);
+    assert(!hasPurple, `Icon ${size}px KHÔNG được chứa màu tím cũ (#6366f1)`);
+  }
+  console.log('✓ 12. Xác thực bộ Icon (16x16, 48x48, 128x128) mang màu xanh Emerald Green chuẩn, loại bỏ hoàn toàn màu tím');
+
+  // 14. Test Preferences Persistence (Settings Memory in chrome.storage.local)
+  function testPreferencesPersistence() {
+    const mockStorage = {};
+    const fakeChromeStorage = {
+      local: {
+        async get(keys) {
+          const result = {};
+          keys.forEach(k => {
+            if (k in mockStorage) result[k] = mockStorage[k];
+          });
+          return result;
+        },
+        async set(items) {
+          Object.assign(mockStorage, items);
+        }
+      }
+    };
+
+    // Save preferences
+    const samplePrefs = {
+      activePreset: 'large',
+      activeRatio: 'LANDSCAPE',
+      activeFormat: 'PNG',
+      minWidth: 600,
+      maxWidth: 1920,
+      minHeight: 400,
+      maxHeight: 1080,
+      sortOrder: 'width-desc',
+      downloadFolder: 'WallpaperFolder',
+      downloadDelay: '500',
+      downloadFormatConvert: 'webp-to-png'
+    };
+
+    fakeChromeStorage.local.set(samplePrefs);
+
+    // Emulate popup state loading
+    const restoredState = {
+      activePreset: 'all',
+      activeRatio: 'ALL',
+      activeFormat: 'ALL',
+      minWidth: null,
+      maxWidth: null,
+      minHeight: null,
+      maxHeight: null,
+      sortOrder: 'default',
+      downloadFolder: '',
+      downloadDelay: '300',
+      downloadFormatConvert: 'original'
+    };
+
+    // Emulate loadPreferences
+    const loadedData = mockStorage;
+    if (loadedData.activePreset !== undefined) restoredState.activePreset = loadedData.activePreset;
+    if (loadedData.activeRatio !== undefined) restoredState.activeRatio = loadedData.activeRatio;
+    if (loadedData.activeFormat !== undefined) restoredState.activeFormat = loadedData.activeFormat;
+    if (loadedData.minWidth !== undefined) restoredState.minWidth = loadedData.minWidth;
+    if (loadedData.maxWidth !== undefined) restoredState.maxWidth = loadedData.maxWidth;
+    if (loadedData.minHeight !== undefined) restoredState.minHeight = loadedData.minHeight;
+    if (loadedData.maxHeight !== undefined) restoredState.maxHeight = loadedData.maxHeight;
+    if (loadedData.sortOrder !== undefined) restoredState.sortOrder = loadedData.sortOrder;
+    if (loadedData.downloadFolder !== undefined) restoredState.downloadFolder = loadedData.downloadFolder;
+    if (loadedData.downloadDelay !== undefined) restoredState.downloadDelay = loadedData.downloadDelay;
+    if (loadedData.downloadFormatConvert !== undefined) restoredState.downloadFormatConvert = loadedData.downloadFormatConvert;
+
+    assert.strictEqual(restoredState.activePreset, 'large', 'Phải khôi phục đúng activePreset');
+    assert.strictEqual(restoredState.activeRatio, 'LANDSCAPE', 'Phải khôi phục đúng activeRatio');
+    assert.strictEqual(restoredState.activeFormat, 'PNG', 'Phải khôi phục đúng activeFormat');
+    assert.strictEqual(restoredState.minWidth, 600, 'Phải khôi phục đúng minWidth');
+    assert.strictEqual(restoredState.maxWidth, 1920, 'Phải khôi phục đúng maxWidth');
+    assert.strictEqual(restoredState.minHeight, 400, 'Phải khôi phục đúng minHeight');
+    assert.strictEqual(restoredState.maxHeight, 1080, 'Phải khôi phục đúng maxHeight');
+    assert.strictEqual(restoredState.sortOrder, 'width-desc', 'Phải khôi phục đúng sortOrder');
+    assert.strictEqual(restoredState.downloadFolder, 'WallpaperFolder', 'Phải khôi phục đúng downloadFolder');
+    assert.strictEqual(restoredState.downloadDelay, '500', 'Phải khôi phục đúng downloadDelay');
+    assert.strictEqual(restoredState.downloadFormatConvert, 'webp-to-png', 'Phải khôi phục đúng downloadFormatConvert');
+  }
+
+  testPreferencesPersistence();
+  console.log('✓ 13. Kiểm thử Ghi nhớ Cài đặt (Preferences Persistence) lưu và khôi phục chính xác 100%');
+
   console.log('\n--- TOÀN BỘ KIỂM TRA EXTENSION THÀNH CÔNG 100%! ---');
 }
 

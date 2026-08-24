@@ -96,17 +96,91 @@ document.addEventListener('DOMContentLoaded', () => {
   async function loadPreferences() {
     try {
       if (chrome.storage && chrome.storage.local) {
-        const data = await chrome.storage.local.get(['downloadFolder', 'downloadDelay', 'downloadFormatConvert']);
-        if (data.downloadFolder && el.downloadFolderInput) {
+        const data = await chrome.storage.local.get([
+          'downloadFolder',
+          'downloadDelay',
+          'downloadFormatConvert',
+          'activePreset',
+          'activeRatio',
+          'activeFormat',
+          'minWidth',
+          'maxWidth',
+          'minHeight',
+          'maxHeight',
+          'sortOrder'
+        ]);
+
+        if (data.downloadFolder !== undefined && el.downloadFolderInput) {
           el.downloadFolderInput.value = data.downloadFolder;
           state.downloadFolder = data.downloadFolder;
         }
-        if (data.downloadDelay && el.downloadDelaySelect) {
+        if (data.downloadDelay !== undefined && el.downloadDelaySelect) {
           el.downloadDelaySelect.value = data.downloadDelay;
         }
-        if (data.downloadFormatConvert && el.downloadFormatConvert) {
+        if (data.downloadFormatConvert !== undefined && el.downloadFormatConvert) {
           el.downloadFormatConvert.value = data.downloadFormatConvert;
         }
+
+        // Restore Preset
+        if (data.activePreset !== undefined && data.activePreset !== null) {
+          state.activePreset = data.activePreset;
+          el.presetChips.forEach(c => c.classList.toggle('active', c.dataset.preset === state.activePreset));
+        }
+
+        // Restore Ratio
+        if (data.activeRatio !== undefined && data.activeRatio !== null) {
+          state.activeRatio = data.activeRatio;
+          el.ratioChips.forEach(c => c.classList.toggle('active', c.dataset.ratio === state.activeRatio));
+        }
+
+        // Restore Format
+        if (data.activeFormat !== undefined && data.activeFormat !== null) {
+          state.activeFormat = data.activeFormat;
+          el.formatChips.forEach(c => c.classList.toggle('active', c.dataset.format === state.activeFormat));
+        }
+
+        // Restore Dimensions
+        if (data.minWidth !== undefined) {
+          state.minWidth = (data.minWidth !== null && data.minWidth !== '') ? parseInt(data.minWidth, 10) : null;
+          if (el.minWidthInput) el.minWidthInput.value = state.minWidth !== null ? state.minWidth : '';
+        }
+        if (data.maxWidth !== undefined) {
+          state.maxWidth = (data.maxWidth !== null && data.maxWidth !== '') ? parseInt(data.maxWidth, 10) : null;
+          if (el.maxWidthInput) el.maxWidthInput.value = state.maxWidth !== null ? state.maxWidth : '';
+        }
+        if (data.minHeight !== undefined) {
+          state.minHeight = (data.minHeight !== null && data.minHeight !== '') ? parseInt(data.minHeight, 10) : null;
+          if (el.minHeightInput) el.minHeightInput.value = state.minHeight !== null ? state.minHeight : '';
+        }
+        if (data.maxHeight !== undefined) {
+          state.maxHeight = (data.maxHeight !== null && data.maxHeight !== '') ? parseInt(data.maxHeight, 10) : null;
+          if (el.maxHeightInput) el.maxHeightInput.value = state.maxHeight !== null ? state.maxHeight : '';
+        }
+
+        // Restore Sort Order
+        if (data.sortOrder !== undefined && data.sortOrder !== null) {
+          state.sortOrder = data.sortOrder;
+          if (el.sortSelect) el.sortSelect.value = state.sortOrder;
+        }
+      }
+    } catch (err) {
+      console.warn('Không thể đọc preferences từ storage:', err);
+    }
+  }
+
+  function saveFilterPreferences() {
+    try {
+      if (chrome.storage && chrome.storage.local) {
+        chrome.storage.local.set({
+          activePreset: state.activePreset,
+          activeRatio: state.activeRatio,
+          activeFormat: state.activeFormat,
+          minWidth: state.minWidth,
+          maxWidth: state.maxWidth,
+          minHeight: state.minHeight,
+          maxHeight: state.maxHeight,
+          sortOrder: state.sortOrder
+        }).catch(() => {});
       }
     } catch {
       // Ignore storage errors
@@ -1206,6 +1280,7 @@ document.addEventListener('DOMContentLoaded', () => {
       state.sortOrder = e.target.value;
       sortFilteredImages();
       render();
+      saveFilterPreferences();
     });
 
     // Preset Dimension Chips
@@ -1229,6 +1304,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         applyFilters();
         render();
+        saveFilterPreferences();
       });
     });
 
@@ -1240,6 +1316,7 @@ document.addEventListener('DOMContentLoaded', () => {
         state.activeRatio = chip.dataset.ratio;
         applyFilters();
         render();
+        saveFilterPreferences();
       });
     });
 
@@ -1251,6 +1328,7 @@ document.addEventListener('DOMContentLoaded', () => {
         state.activeFormat = chip.dataset.format;
         applyFilters();
         render();
+        saveFilterPreferences();
       });
     });
 
@@ -1269,6 +1347,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       applyFilters();
       render();
+      saveFilterPreferences();
     };
 
     el.minWidthInput.addEventListener('input', onDimInputChange);
@@ -1299,6 +1378,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       applyFilters();
       render();
+      saveFilterPreferences();
     };
 
     el.btnResetFilters.addEventListener('click', resetFilters);
@@ -1319,17 +1399,37 @@ document.addEventListener('DOMContentLoaded', () => {
     el.btnCopyUrls.addEventListener('click', copySelectedUrls);
     el.btnExportTxt.addEventListener('click', exportSelectedUrlsTxt);
 
-    // Download Buttons (Sequential & ZIP)
-    el.btnDownloadSelected.addEventListener('click', startSequentialDownload);
-    if (el.btnDownloadZip) {
-      el.btnDownloadZip.addEventListener('click', startZipDownload);
+    // Download Option Preferences (Folder, Delay, Convert)
+    if (el.downloadFolderInput) {
+      el.downloadFolderInput.addEventListener('input', (e) => {
+        const val = e.target.value.trim();
+        state.downloadFolder = val;
+        if (chrome.storage && chrome.storage.local) {
+          chrome.storage.local.set({ downloadFolder: val });
+        }
+      });
     }
+
+    if (el.downloadDelaySelect) {
+      el.downloadDelaySelect.addEventListener('change', (e) => {
+        if (chrome.storage && chrome.storage.local) {
+          chrome.storage.local.set({ downloadDelay: e.target.value });
+        }
+      });
+    }
+
     if (el.downloadFormatConvert) {
       el.downloadFormatConvert.addEventListener('change', (e) => {
         if (chrome.storage && chrome.storage.local) {
           chrome.storage.local.set({ downloadFormatConvert: e.target.value });
         }
       });
+    }
+
+    // Download Buttons (Sequential & ZIP)
+    el.btnDownloadSelected.addEventListener('click', startSequentialDownload);
+    if (el.btnDownloadZip) {
+      el.btnDownloadZip.addEventListener('click', startZipDownload);
     }
 
     // Cancel Download Button
